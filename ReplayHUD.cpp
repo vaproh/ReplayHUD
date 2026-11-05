@@ -137,6 +137,8 @@ replayhud::OverlayPayload* g_overlayPayload = nullptr;
 std::mutex g_injectedProcessesMutex;
 std::map<DWORD, bool> g_injectedProcesses;
 
+void Log(const std::wstring& message);
+
 void PublishOverlayPayload(const std::wstring& title, const std::wstring& subtitle, UINT durationMs) {
     if (!g_overlayPayload) return;
     HANDLE mutex = OpenMutexW(SYNCHRONIZE | MUTEX_MODIFY_STATE, FALSE,
