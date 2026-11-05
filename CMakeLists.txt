@@ -31,6 +31,12 @@ FetchContent_Declare(d3d8to9
 )
 FetchContent_MakeAvailable(d3d8to9)
 target_sources(d3d8to9 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/ReplayHUDD3D8Bootstrap.cpp")
+if(MSVC)
+    set_property(TARGET d3d8to9 PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    )
+    target_compile_options(d3d8to9 PRIVATE /W3 /utf-8)
+endif()
 set_target_properties(d3d8to9 PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/d3d8-proxy"
 )
