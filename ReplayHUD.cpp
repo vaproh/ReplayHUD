@@ -410,21 +410,12 @@ bool EnsureForegroundHookInjected(HANDLE readyEvent) {
 
     DWORD processId = 0;
     GetWindowThreadProcessId(foreground, &processId);
-    if (!processId || processId == GetCurrentProcessId()) {
-        CloseHandle(readyEvent);
-        return false;
-    }
+    if (!processId || processId == GetCurrentProcessId()) return false;
 
     bool hookAlreadyLoaded = false;
-    if (!InspectOverlayTargetModules(processId, hookAlreadyLoaded)) {
-        CloseHandle(readyEvent);
-        return false;
-    }
+    if (!InspectOverlayTargetModules(processId, hookAlreadyLoaded)) return false;
 
-    if (!hookAlreadyLoaded && !InjectHookIntoProcess(processId, hookDllPath)) {
-        CloseHandle(readyEvent);
-        return false;
-    }
+    if (!hookAlreadyLoaded && !InjectHookIntoProcess(processId, hookDllPath)) return false;
 
     // Only suppress the desktop toast once the injected renderer has actually
     // drawn this notification. If no backend presents, keep the desktop fallback.
