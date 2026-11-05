@@ -14,7 +14,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-cmake -S . -B build -A x64 -DUIH_BUILD_TESTS=ON
+cmake -S . -B build -A x64 -DREPLAYHUD_BUILD_BACKEND_TESTS=ON
 if errorlevel 1 exit /b 1
 
 cmake --build build --config Release --parallel
