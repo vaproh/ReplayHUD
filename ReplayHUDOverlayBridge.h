@@ -12,8 +12,9 @@ constexpr ULONG kOverlayPayloadVersion = 4;
 constexpr size_t kOverlayTitleLength = 64;
 constexpr size_t kOverlaySubtitleLength = 256;
 
-// Shared between ReplayHUD.exe and ReplayHUDHook.dll. All payload reads and
-// writes are protected by the named mutex; no cross-process C++ data races.
+// Shared between the x64 app and x86/x64 game hooks. Keep the layout fixed
+// across architectures; all reads and writes use the named mutex.
+#pragma pack(push, 8)
 struct OverlayPayload {
     ULONG version;
     ULONG active;
@@ -23,7 +24,9 @@ struct OverlayPayload {
     WCHAR title[kOverlayTitleLength];
     WCHAR subtitle[kOverlaySubtitleLength];
 };
+#pragma pack(pop)
 
 static_assert(std::is_trivially_copyable_v<OverlayPayload>);
+static_assert(sizeof(OverlayPayload) == 664, "Shared overlay payload layout changed");
 
 } // namespace replayhud
