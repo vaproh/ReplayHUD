@@ -393,14 +393,11 @@ bool InspectOverlayTargetModules(DWORD processId, bool& hookLoaded) {
     return graphicsRuntimeLoaded && !protectedRuntimeLoaded;
 }
 
-bool EnsureForegroundHookInjected() {
-    HANDLE readyEvent = CreateEventW(nullptr, TRUE, FALSE, replayhud::kOverlayReadyEventName);
+bool EnsureForegroundHookInjected(HANDLE readyEvent) {
     if (!readyEvent) return false;
-    ResetEvent(readyEvent);
 
     const std::wstring hookDllPath = GetHookDllPath();
     if (hookDllPath.empty() || GetFileAttributesW(hookDllPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        CloseHandle(readyEvent);
         return false;
     }
 
@@ -431,7 +428,6 @@ bool EnsureForegroundHookInjected() {
     // Only suppress the desktop toast once the injected renderer has actually
     // drawn this notification. If no backend presents, keep the desktop fallback.
     const DWORD wait = WaitForSingleObject(readyEvent, 1000);
-    CloseHandle(readyEvent);
     return wait == WAIT_OBJECT_0;
 }
 
@@ -1351,8 +1347,12 @@ void ShowNotification(const std::wstring& path, bool test,
             MessageBeep(MB_ICONASTERISK);
     }
 
+    HANDLE readyEvent = CreateEventW(nullptr, TRUE, FALSE, replayhud::kOverlayReadyEventName);
+    if (readyEvent) ResetEvent(readyEvent);
     PublishOverlayPayload(g_toastTitle, g_toastSubtitle, settings.durationMs, settings.position, settings.marginPx);
-    if (EnsureForegroundHookInjected()) {
+    const bool gameOverlayReady = EnsureForegroundHookInjected(readyEvent);
+    if (readyEvent) CloseHandle(readyEvent);
+    if (gameOverlayReady) {
         KillTimer(g_overlayWindow, kToastTimer);
         KillTimer(g_overlayWindow, kAnimationTimer);
         ShowWindow(g_overlayWindow, SW_HIDE);
