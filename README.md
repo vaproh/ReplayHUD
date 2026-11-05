@@ -1,190 +1,256 @@
 # ReplayHUD
 
-ReplayHUD is a lightweight native Windows notification app for OBS Studio's Replay Buffer. When OBS saves a replay, ReplayHUD shows a desktop toast with the saved filename and can play a notification sound.
+[![Build](https://github.com/vaproh/ReplayHUD/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/vaproh/ReplayHUD/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/vaproh/ReplayHUD?display_name=tag)](https://github.com/vaproh/ReplayHUD/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE.txt)
+
+**ReplayHUD** is a lightweight native Windows companion for OBS Studio. When OBS saves a Replay Buffer clip, ReplayHUD displays a compact notification with the clip's filename. It can also show replay-buffer state changes, play a notification sound, and open the saved clip when you click its notification.
+
+ReplayHUD can display notifications on the desktop or, where a compatible game renderer is available, inside the foreground game.
 
 ![ReplayHUD app icon](assets/ReplayHUD-icon-preview.png)
 
 ## Features
 
-- **Saved-clip notifications:** listens for OBS WebSocket v5 `ReplayBufferSaved` events and displays the actual saved filename.
-- **Replay buffer state notifications:** shows notifications when OBS replay buffer starts or stops.
-- **Click to open:** click a replay notification to open the saved clip in its default application.
-- **System tray menu:** open Settings, test the notification, open the last replay, view the log, or exit.
-- **Settings window:** configure the OBS WebSocket port/password, sound, notification duration, screen position, edge margin, and Windows startup.
-- **Password protection:** stores the OBS WebSocket password using Windows DPAPI for the current Windows user account.
-- **Native Windows app:** C++17 and Win32 APIs; no Electron, browser runtime, or .NET runtime.
-- **Embedded icon:** the ReplayHUD icon is compiled into the executable and used for the app, tray, and notification.
-- **Automatic reconnect:** changing the OBS connection settings requests a clean WebSocket shutdown and reconnect.
-- **Experimental multi-API game overlay:** a companion DLL uses a shared Dear ImGui notification renderer with dedicated Direct3D 9/10/11/12, Vulkan, and OpenGL backends.
+- **Saved replay notifications** — receives OBS WebSocket v5 \`ReplayBufferSaved\` events and displays the path reported by OBS.
+- **Replay Buffer status** — notifies you when the buffer starts or stops.
+- **Click to open** — click a saved-replay notification to open the clip with its default Windows application.
+- **System tray controls** — open Settings, preview a notification, open the last replay, view the log, or exit.
+- **Configurable notifications** — choose the screen corner, edge margin, duration, and notification sound.
+- **OBS connection settings** — configure the local WebSocket port and optional password.
+- **Automatic reconnect** — changing the OBS connection settings reconnects using the new configuration.
+- **Optional Windows startup** — launch ReplayHUD automatically when you sign in.
+- **In-game notifications** — a companion hook can render notifications through supported Direct3D, Vulkan, and OpenGL backends.
+- **Native and lightweight** — written in C++17 with Win32 APIs. No Electron, browser runtime, or .NET runtime is required.
 
 ## Requirements
 
-- Windows 10 version 1703 or newer, 64-bit host OS. The package includes x64 and x86 game hooks.
-- OBS Studio with the built-in WebSocket server (OBS Studio 28 or newer is recommended).
+- Windows 10 or Windows 11, 64-bit.
+- OBS Studio with the obs-websocket v5 server. OBS Studio 28 and newer include it.
 - OBS Replay Buffer enabled and started.
+- For the in-game overlay: a game using a supported graphics API and allowing third-party overlays. Compatibility varies by game, renderer, driver, and display mode.
 
-## Download
+ReplayHUD connects to OBS on the local machine (\`127.0.0.1\`). It does not need an external server or cloud account.
 
-Download `ReplayHUD-Windows.zip` from the repository's [Releases](../../releases) page. Extract the ZIP and run `ReplayHUD.exe`. The x86 helper and both architecture-specific D3D8 proxies are included.
+## Download and install
 
-On first launch, ReplayHUD starts in the system tray. Click the tray icon with the right mouse button and choose **Settings...**.
+1. Open [Releases](https://github.com/vaproh/ReplayHUD/releases).
+2. Download \`ReplayHUD-Windows.zip\` from the release you want.
+3. Extract the entire ZIP to a folder. Keep the included DLLs and helper executable alongside \`ReplayHUD.exe\` in the supplied directory structure.
+4. Run \`ReplayHUD.exe\`.
 
-## Configure OBS
+ReplayHUD starts in the Windows system tray. Right-click its tray icon and select **Settings...** to configure the OBS connection.
+
+### Package contents
+
+The release ZIP contains:
+
+| File | Purpose |
+|---|---|
+| \`ReplayHUD.exe\` | Main 64-bit desktop application |
+| \`ReplayHUDHook.dll\` | 64-bit in-game notification hook |
+| \`d3d8.dll\` | 64-bit Direct3D 8-to-9 proxy |
+| \`ReplayHUDInjector32.exe\` | Helper used to load the 32-bit hook into 32-bit games |
+| \`x86/ReplayHUDHook.dll\` | 32-bit in-game notification hook |
+| \`x86/d3d8.dll\` | 32-bit Direct3D 8-to-9 proxy |
+| \`README.md\` | This guide |
+| \`LICENSE*.txt\` | ReplayHUD and third-party license notices |
+
+**Keep the folder structure intact.** The main application expects the 32-bit helper and hook in these relative locations.
+
+## Configure OBS Studio
 
 1. Open OBS Studio.
 2. Go to **Tools → WebSocket Server Settings**.
 3. Enable the WebSocket server.
-4. Keep the server on its local machine interface. ReplayHUD connects only to `127.0.0.1`.
-5. Note the port (OBS commonly uses `4455`) and password, if authentication is enabled.
+4. Keep the server bound to the local machine. ReplayHUD connects to \`127.0.0.1\`.
+5. Note the server port and password. The default OBS WebSocket port is usually \`4455\`.
 6. Enable and start **Replay Buffer**.
-7. Open ReplayHUD's tray menu → **Settings...** and enter the same port/password.
-8. Click **Save settings**. ReplayHUD reconnects using the new values.
+7. Open the ReplayHUD tray menu and choose **Settings...**.
+8. Enter the same port and password used by OBS, then select **Save settings**.
 
-If OBS WebSocket authentication is disabled, leave the password field empty.
+If OBS WebSocket authentication is disabled, leave the password field empty. ReplayHUD reconnects after you save changed connection settings.
 
 ## Settings
 
-Open Settings from the ReplayHUD tray menu.
+Open **Settings...** from the ReplayHUD tray menu.
 
-| Setting | Default | Range / meaning |
+| Setting | Default | Details |
 |---|---:|---|
-| OBS WebSocket port | `4455` | 1–65535; must match OBS |
-| OBS WebSocket password | empty | Encrypted with DPAPI for the current Windows user |
-| Notification sound | On | Plays the Windows `SystemAsterisk` sound |
-| Notification duration | `2400 ms` | 800–10000 ms |
-| Screen edge margin | `24 px` | 8–200 px |
-| Position | Top right | Top right, top left, bottom right, bottom left |
-| Start with Windows | Off | Adds/removes a per-user Run registry entry |
+| OBS WebSocket port | \`4455\` | Port number from OBS; valid range is 1–65535 |
+| OBS WebSocket password | Empty | Optional; protected with Windows DPAPI |
+| Notification sound | On | Uses the Windows \`SystemAsterisk\` sound |
+| Notification duration | \`2400 ms\` | Valid range: 800–10000 ms |
+| Screen edge margin | \`24 px\` | Valid range: 8–200 px |
+| Notification position | Top right | Top right, top left, bottom right, or bottom left |
+| Start with Windows | Off | Adds or removes a per-user startup entry |
 
-Settings are saved to:
+### Configuration and logs
 
-```text
-%LOCALAPPDATA%\ReplayHUD\ReplayHUD.ini
-```
+ReplayHUD stores its files in:
 
-The connection log is saved to:
+\`\`\`text
+%LOCALAPPDATA%\\ReplayHUD\\
+\`\`\`
 
-```text
-%LOCALAPPDATA%\ReplayHUD\ReplayHUD.log
-```
+| File | Contents |
+|---|---|
+| \`ReplayHUD.ini\` | Application and connection settings |
+| \`ReplayHUD.log\` | OBS connection and application log |
+| \`ReplayHUDHook.log\` | In-game hook diagnostics |
 
-The password is stored as a DPAPI-protected value. It is intended to be decrypted by the same Windows user on the same machine; it is not a portable password backup.
+The OBS password is protected with Windows Data Protection API (DPAPI). It is intended to be decrypted by the same Windows user on the same machine; copying the INI file to another Windows account or computer does not make the password portable. If the saved password cannot be decrypted, enter it again in Settings.
 
-## Use
+## Using ReplayHUD
 
-- **Right-click tray icon → Settings...** opens the settings window.
-- **Right-click tray icon → Test notification** previews the notification and sound.
-- **Right-click tray icon → Open last replay** opens the most recently saved clip.
-- **Right-click tray icon → Open log file** opens the connection log.
-- **Right-click tray icon → Exit ReplayHUD** closes the app.
-- **Click a saved-clip notification** to open that clip.
+ReplayHUD runs in the system tray.
 
-ReplayHUD does not record video, modify OBS scenes, or change Replay Buffer files. It only reacts to OBS's save event.
+| Action | Result |
+|---|---|
+| **Settings...** | Configure the OBS connection and notification appearance |
+| **Test notification** | Preview a notification and its sound without saving a replay |
+| **Open last replay** | Open the most recently saved replay reported by OBS |
+| **Open log file** | Open the application log |
+| **Exit ReplayHUD** | Close the application |
+
+When OBS reports a saved replay, ReplayHUD displays the filename/path. Click the notification to open the clip in its default application.
+
+ReplayHUD does not record, encode, move, rename, or edit video files. OBS remains responsible for recording and saving the Replay Buffer clips.
+
+## In-game overlay
+
+ReplayHUD includes a companion hook based on [Universal Dear ImGui Hook](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook). The main application publishes notification data through shared memory. The hook renders that notification in a compatible foreground game; if the in-game renderer does not become ready, ReplayHUD keeps the desktop notification as a fallback.
+
+### Graphics API support
+
+The current build integrates these renderer backends:
+
+| Graphics API | Implementation | Notes |
+|---|---|---|
+| Direct3D 8 | \`d3d8to9\` proxy + ReplayHUD hook | Requires manual, per-game proxy placement |
+| Direct3D 9 | Universal Dear ImGui Hook backend | Game/driver compatibility varies |
+| Direct3D 10 | Universal Dear ImGui Hook backend | Game/driver compatibility varies |
+| Direct3D 11 | Universal Dear ImGui Hook backend | Game/driver compatibility varies |
+| Direct3D 12 | Universal Dear ImGui Hook backend | Game/driver compatibility varies |
+| Vulkan | Universal Dear ImGui Hook backend | Game/driver compatibility varies |
+| OpenGL | Universal Dear ImGui Hook backend | WGL; game/driver compatibility varies |
+
+Backend integration does not mean every game has been validated. Treat the overlay as experimental and test it with the specific games and graphics settings you use.
+
+### Direct3D 8 games
+
+D3D8 games use the bundled \`d3d8to9\` proxy to translate Direct3D 8 calls to Direct3D 9. To try the overlay in a D3D8 game:
+
+1. Close the game.
+2. Copy the architecture-matching \`d3d8.dll\` and \`ReplayHUDHook.dll\` into the game's executable directory.
+   - 64-bit game: use the two files in the ZIP root.
+   - 32-bit game: use \`x86/d3d8.dll\` and \`x86/ReplayHUDHook.dll\`.
+3. Start ReplayHUD, then launch the game.
+4. To undo the proxy installation, close the game and remove the local \`d3d8.dll\` and \`ReplayHUDHook.dll\` files you copied there.
+
+The proxy loads ReplayHUD's hook from the same directory. Some older games may behave differently under D3D8-to-D3D9 translation. A few titles may also need the legacy DirectX End-User Runtime for D3DX shader helpers.
+
+For D3D9, D3D10/11/12, Vulkan, and OpenGL, ReplayHUD attempts to hook the foreground process when it detects a supported graphics runtime. The main application is 64-bit and delegates 32-bit injection to \`ReplayHUDInjector32.exe\`.
+
+### Compatibility and safety notes
+
+- Overlay support depends on the game, graphics API, driver, swap-chain configuration, and display mode. Borderless fullscreen is often a useful first configuration to test.
+- HDR, unusual swap-chain formats, multiple render windows, and other overlay software can cause compatibility issues.
+- ReplayHUD excludes several common desktop applications and checks for known anti-cheat modules before attempting injection. This is a best-effort filter, not a complete anti-cheat detector.
+- Protected games or anti-cheat software may block third-party overlays. ReplayHUD does not bypass anti-cheat or other game protections. Do not use the overlay in games where it is prohibited.
+- The desktop notification remains the fallback if the in-game hook cannot initialize or render the notification.
+- Hook diagnostics are written to \`%LOCALAPPDATA%\\ReplayHUD\\ReplayHUDHook.log\` in the target process.
 
 ## Build from source
 
-### Requirements
+ReplayHUD is a Windows application and must be built on Windows.
 
-- Visual Studio 2022 or Visual Studio 2022 Build Tools with **Desktop development with C++**.
+### Build requirements
+
+- Visual Studio 2022 or Visual Studio 2022 Build Tools.
+- The **Desktop development with C++** workload and a Windows 10/11 SDK.
 - CMake 3.21 or newer.
-- Windows 10/11 SDK.
+- Git, for fetching the pinned CMake dependencies.
 
-### Build
+### Build the application and companion binaries
 
 Open **x64 Native Tools Command Prompt for VS 2022**, change to the repository directory, and run:
 
-```bat
+\`\`\`bat
 build.bat
-```
+\`\`\`
 
-The executable and hook companion DLL are created at:
+The script configures x64 and x86 builds, builds the application and companion components, and enables the upstream backend test hosts for local development.
 
-```text
-build\Release\ReplayHUD.exe
-build\Release\ReplayHUDHook.dll
-build\d3d8-proxy\Release\d3d8.dll
-build-x86\Release\ReplayHUDInjector32.exe
-build-x86\Release\ReplayHUDHook.dll
-build-x86\d3d8-proxy\Release\d3d8.dll
-```
+Expected primary outputs:
 
-You can also build directly with CMake:
+\`\`\`text
+build\\Release\\ReplayHUD.exe
+build\\Release\\ReplayHUDHook.dll
+build\\d3d8-proxy\\Release\\d3d8.dll
+build-x86\\Release\\ReplayHUDInjector32.exe
+build-x86\\Release\\ReplayHUDHook.dll
+build-x86\\d3d8-proxy\\Release\\d3d8.dll
+\`\`\`
 
-```bat
-cmake -S . -B build -A x64
+### Build without the upstream test hosts
+
+The GitHub Actions release workflow disables the upstream backend test hosts to keep release builds focused on compiling and packaging the application. To reproduce that build locally:
+
+\`\`\`bat
+cmake -S . -B build -A x64 -DREPLAYHUD_BUILD_BACKEND_TESTS=OFF
 cmake --build build --config Release --parallel
+
 cmake -S . -B build-x86 -A Win32 -DREPLAYHUD_BUILD_BACKEND_TESTS=OFF
 cmake --build build-x86 --config Release --target ReplayHUDHook d3d8to9 ReplayHUDInjector32 --parallel
-```
+\`\`\`
 
-The build uses the static MSVC runtime (`/MT`). CMake fetches pinned revisions of Universal Dear ImGui Hook and d3d8to9. The former provides the D3D9/10/11/12, Vulkan and OpenGL renderers; the latter translates D3D8 to D3D9. The x86 build supplies a 32-bit hook and helper injector for legacy 32-bit games. The application icon and Windows file-version metadata are embedded from `assets/ReplayHUD.ico` and `ReplayHUD.rc.in`.
+CMake fetches pinned revisions of Universal Dear ImGui Hook and \`d3d8to9\`. The project uses the static MSVC runtime.
 
-## Automated GitHub Releases
+## GitHub Actions and releases
 
-The workflow at `.github/workflows/release.yml` builds and tests pull requests, pushes to `main`, and version tags. A push to `main` runs validation and uploads a CI artifact; it does not create or overwrite a public release. Releases are published only from an explicit version tag after the tag's build and tests pass.
+The workflow in [\`.github/workflows/release.yml\`](.github/workflows/release.yml) has two triggers:
 
-```bash
+- A push to \`main\` builds x64 and x86 binaries and uploads a workflow artifact.
+- A push of a tag matching \`v*\` builds the same binaries, uploads the artifact, then publishes a GitHub Release containing the ZIP and individual binaries.
+
+Pull requests are not currently built by this workflow. The release workflow is a build-and-package pipeline; it does not run the removed graphics test suite.
+
+### Create a release
+
+Push your changes to \`main\`, then create and push a version tag:
+
+\`\`\`bash
 git add .
 git commit -m "Prepare release"
 git push origin main
 
-# After reviewing the successful main-branch build:
 git tag -a vX.Y.Z -m "ReplayHUD vX.Y.Z"
 git push origin vX.Y.Z
-```
+\`\`\`
 
-For each pull request, main-branch push, or version-tag push, GitHub Actions:
+Replace \`X.Y.Z\` with the version you are releasing. The tag push starts a new workflow run. When the build succeeds, the release job publishes the package and generates release notes.
 
-1. Builds the x64 application and hook, plus the x86 hook, helper injector, and D3D8 proxy.
-2. Runs x64 and x86 graphics smoke tests: D3D9, WARP for D3D10/11/12, and Mesa software drivers for Vulkan/OpenGL. The x64 build also runs the graphics lifecycle regression suite, Direct3D debug-layer checks, and Vulkan validation-layer checks.
-3. Packages both architectures, the D3D8 compatibility proxy, and required third-party license notices into `ReplayHUD-Windows.zip`.
-4. Uploads the tested package as a workflow artifact. For a `v*` tag, a separate least-privilege release job publishes that exact tested artifact and generates release notes.
+If you move or recreate an existing tag, push the updated ref explicitly:
 
-A manual run from the Actions tab builds and uploads workflow artifacts but does not publish a GitHub Release. The build job uses read-only repository permissions; only the tag-gated release job receives `contents: write`.
+\`\`\`bash
+git tag -f vX.Y.Z <commit>
+git push origin refs/tags/vX.Y.Z --force
+\`\`\`
 
-## In-game overlay API support
+A manual run from the Actions tab builds and uploads an artifact. It does not publish a GitHub Release because the release job only runs for version-tag refs.
 
-The in-game overlay uses a pinned revision of the MIT-licensed [Universal Dear ImGui Hook](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook) as its graphics interception and rendering layer. ReplayHUD supplies the notification UI and shared-memory bridge; the backend library handles API detection, present hooks, device lifecycle, and graphics-state management.
+See [all workflow runs](https://github.com/vaproh/ReplayHUD/actions) and [published releases](https://github.com/vaproh/ReplayHUD/releases).
 
-This ReplayHUD application is Windows-only. It does not yet include a native Linux companion for Linux games or Proton/Wine sessions.
+## OBS WebSocket protocol
 
-| Graphics API | Status in this build |
-|---|---|
-| Direct3D 8 | Supported through the bundled d3d8to9 proxy, which translates D3D8 to D3D9. Requires per-game proxy installation. |
-| Direct3D 9 | Backend integrated; requires in-game validation |
-| Direct3D 10 | Backend integrated; requires in-game validation |
-| Direct3D 11 | Backend integrated; requires in-game validation |
-| Direct3D 12 | Backend integrated; requires in-game validation |
-| Vulkan | Backend integrated; requires in-game validation |
-| OpenGL 3.0+ (WGL) | Backend integrated; requires in-game validation |
+ReplayHUD implements the OBS WebSocket v5 connection flow, including the \`Hello\` / \`Identify\` handshake and SHA-256 challenge-response authentication. It subscribes to output events and handles:
 
-The backend library's automated host tests cover API-specific rendering, swap-chain/device recreation, resize handling, and several failure scenarios. ReplayHUD's own notification-to-renderer integration still needs end-to-end validation with OBS notifications in real games.
-
-Important limits:
-
-- The main ReplayHUD app is x64. It launches the bundled x86 helper to inject the x86 hook into 32-bit game processes.
-- For D3D8 games, copy the architecture-matching `d3d8.dll` and `ReplayHUDHook.dll` from the package into the game's executable directory. Use the package root files for 64-bit games and the `x86` folder for 32-bit games. The proxy loads the hook from the same directory and translates D3D8 rendering to D3D9.
-- The D3D8 proxy is an API translation layer, not native D3D8 rendering. Some old titles behave differently under translation; d3d8to9 may also need the legacy DirectX End-User Runtime for D3DX shader helpers. Remove the local `d3d8.dll` to revert to the system D3D8 runtime.
-- HDR output, unusual swap-chain formats, overlays from other tools, and games with multiple render windows may still expose compatibility issues.
-- Exclusive-fullscreen visibility depends on the display mode, driver, and application. Borderless-fullscreen is the first configuration to validate.
-- ReplayHUD only attempts injection when the foreground process has a supported graphics runtime loaded. Common desktop apps/launchers and several known anti-cheat modules are excluded. This is a best-effort safety filter, not a complete anti-cheat detector.
-- Protected games and anti-cheat systems may still block third-party overlays. ReplayHUD does not attempt to bypass those protections; use only titles where overlays are permitted.
-- The desktop toast is suppressed only after the in-game renderer has drawn the notification. If no compatible renderer becomes ready, the desktop toast remains the fallback.
-- Hook diagnostics are written to `%LOCALAPPDATA%\\ReplayHUD\\ReplayHUDHook.log` in the target process.
-- If injection or hook initialization fails, ReplayHUD continues using the regular desktop toast behavior.
-
-## Troubleshooting
-
-- Check the tray tooltip. It reports whether ReplayHUD is connected, waiting, or has an OBS WebSocket error.
-- Confirm OBS WebSocket is enabled and the port/password match.
-- Confirm Replay Buffer is started, not merely configured.
-- Use **Test notification** to verify the Windows notification UI independently of OBS.
-- Open `%LOCALAPPDATA%\ReplayHUD\ReplayHUD.log` for connection details.
-
-## Protocol
-
-ReplayHUD uses OBS WebSocket v5's `Hello` / `Identify` handshake, SHA-256 challenge-response authentication, and the `Outputs` event subscription. It handles `ReplayBufferSaved` (using `eventData.savedReplayPath`) plus replay-buffer state events (`ReplayBufferStateChanged`, `ReplayBufferStarted`, `ReplayBufferStopped`).
+- \`ReplayBufferSaved\` — reads \`eventData.savedReplayPath\`.
+- \`ReplayBufferStarted\` — reports that the Replay Buffer started.
+- \`ReplayBufferStopped\` — reports that the Replay Buffer stopped.
+- \`ReplayBufferStateChanged\` — reads \`eventData.outputActive\`.
 
 ## License
 
-MIT. See [LICENSE.txt](LICENSE.txt).
+ReplayHUD is released under the [MIT License](LICENSE.txt). The release archive also includes license notices for its bundled third-party dependencies.
