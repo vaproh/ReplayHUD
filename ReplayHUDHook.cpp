@@ -22,6 +22,7 @@ namespace {
 HANDLE g_overlayMapping = nullptr;
 HANDLE g_overlayMutex = nullptr;
 std::atomic<HANDLE> g_overlayReadyEvent{ nullptr };
+std::atomic_uint32_t g_readyEventOpenAttempts{ 0 };
 const replayhud::OverlayPayload* g_overlayPayload = nullptr;
 
 void LogHook(const wchar_t* message) {
@@ -116,14 +117,17 @@ std::string WideToUtf8(const wchar_t* text, size_t length) {
 void SignalOverlayReady() {
     HANDLE event = g_overlayReadyEvent.load(std::memory_order_acquire);
     if (!event) {
-        HANDLE opened = OpenEventW(EVENT_MODIFY_STATE, FALSE, replayhud::kOverlayReadyEventName);
-        if (opened) {
+        const uint32_t attempt = g_readyEventOpenAttempts.fetch_add(1, std::memory_order_relaxed);
+        if (attempt == 0 || attempt % 15 == 0) {
+            HANDLE opened = OpenEventW(EVENT_MODIFY_STATE, FALSE, replayhud::kOverlayReadyEventName);
+            if (opened) {
             HANDLE expected = nullptr;
             if (!g_overlayReadyEvent.compare_exchange_strong(expected, opened,
                     std::memory_order_release, std::memory_order_acquire)) {
                 CloseHandle(opened);
             }
-            event = g_overlayReadyEvent.load(std::memory_order_acquire);
+                event = g_overlayReadyEvent.load(std::memory_order_acquire);
+            }
         }
     }
     if (event) SetEvent(event);
