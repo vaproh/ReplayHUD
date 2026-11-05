@@ -121,18 +121,15 @@ The build uses the static MSVC runtime (`/MT`). CMake fetches pinned revisions o
 
 ## Automated GitHub Releases
 
-The workflow at `.github/workflows/release.yml` builds the x64 app plus x64/x86 graphics hooks and D3D8 proxies whenever a tag matching `v*` is pushed.
+The workflow at `.github/workflows/release.yml` builds and tests every pull request and branch update. After a successful build on `main`, it removes the temporary development branches, creates the `v1.3.0` tag, and publishes the GitHub Release.
 
 ```bash
 git add .
 git commit -m "Prepare release"
 git push origin main
-
-git tag -a v1.3.0 -m "ReplayHUD v1.3.0"
-git push origin v1.3.0
 ```
 
-For a tagged build, GitHub Actions:
+After the main-branch build passes, GitHub Actions:
 
 1. Builds the x64 application and hook, plus x86 hook, helper injector, and D3D8 proxy.
 2. Runs x64 and x86 smoke tests: D3D9 on the hosted device, WARP for D3D10/11/12, and Mesa software drivers for Vulkan/OpenGL; the x64 build also runs the graphics lifecycle regression suite.
