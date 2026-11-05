@@ -138,22 +138,26 @@ std::map<DWORD, bool> g_injectedProcesses;
 
 void PublishOverlayPayload(const std::wstring& title, const std::wstring& subtitle, UINT durationMs) {
     if (!g_overlayPayload) return;
-    replayhud::OverlayPayload payload{};
-    payload.version = replayhud::kOverlayPayloadVersion;
-    payload.active = 1;
-    payload.expiresAtTick = GetTickCount64() + durationMs;
-    wcsncpy_s(payload.title, title.c_str(), _TRUNCATE);
-    wcsncpy_s(payload.subtitle, subtitle.c_str(), _TRUNCATE);
-    *g_overlayPayload = payload;
+    InterlockedIncrement(&g_overlayPayload->sequence); // odd: writer owns the payload
+    g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
+    g_overlayPayload->active = 1;
+    g_overlayPayload->expiresAtTick = GetTickCount64() + durationMs;
+    wcsncpy_s(g_overlayPayload->title, title.c_str(), _TRUNCATE);
+    wcsncpy_s(g_overlayPayload->subtitle, subtitle.c_str(), _TRUNCATE);
+    MemoryBarrier();
+    InterlockedIncrement(&g_overlayPayload->sequence); // even: publish complete payload
 }
 
 void ClearOverlayPayload() {
     if (!g_overlayPayload) return;
+    InterlockedIncrement(&g_overlayPayload->sequence);
     g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
     g_overlayPayload->active = 0;
     g_overlayPayload->expiresAtTick = 0;
     g_overlayPayload->title[0] = L'\0';
     g_overlayPayload->subtitle[0] = L'\0';
+    MemoryBarrier();
+    InterlockedIncrement(&g_overlayPayload->sequence);
 }
 
 bool InitializeOverlayBridge() {
@@ -221,6 +225,14 @@ bool InjectHookIntoProcess(DWORD processId, const std::wstring& hookDllPath) {
         return false;
     }
 
+    // This build ships an x64 hook DLL. Never attempt to load it into a WOW64 process.
+    BOOL targetIsWow64 = FALSE;
+    if (!IsWow64Process(process, &targetIsWow64) || targetIsWow64) {
+        VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
+        CloseHandle(process);
+        return false;
+    }
+
     HANDLE remoteThread = CreateRemoteThread(process, nullptr, 0, loadLibrary, remotePath, 0, nullptr);
     if (!remoteThread) {
         VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
@@ -228,13 +240,15 @@ bool InjectHookIntoProcess(DWORD processId, const std::wstring& hookDllPath) {
         return false;
     }
 
-    WaitForSingleObject(remoteThread, 1500);
+    // Do not free remotePath while LoadLibraryW may still be reading it.
+    const DWORD waitResult = WaitForSingleObject(remoteThread, INFINITE);
     DWORD remoteResult = 0;
-    GetExitCodeThread(remoteThread, &remoteResult);
+    const bool completed = waitResult == WAIT_OBJECT_0 &&
+        GetExitCodeThread(remoteThread, &remoteResult) != FALSE;
     CloseHandle(remoteThread);
     VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
     CloseHandle(process);
-    return remoteResult != 0;
+    return completed && remoteResult != 0;
 }
 
 void EnsureForegroundHookInjected() {
