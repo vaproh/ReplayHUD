@@ -47,7 +47,7 @@ For normal use, download and run `ReplayHUD.exe`. It starts in the Windows syste
 The application extracts its embedded game-overlay components into a build-specific directory under:
 
 ```text
-%LOCALAPPDATA%\\ReplayHUD\\Runtime\\
+%LOCALAPPDATA%\ReplayHUD\Runtime\
 ```
 
 The x64 hook, x86 hook, and x86 injector are kept in architecture-specific subdirectories. The directory is versioned per build so an updated ReplayHUD does not overwrite a DLL that an older game process may still have loaded. These files are managed by ReplayHUD; users do not need to copy or launch them manually.
@@ -84,7 +84,7 @@ Open **Settings...** from the ReplayHUD tray menu.
 ReplayHUD stores settings and logs in:
 
 ```text
-%LOCALAPPDATA%\\ReplayHUD\\
+%LOCALAPPDATA%\ReplayHUD\
 ```
 
 | File or directory | Contents |
@@ -92,8 +92,8 @@ ReplayHUD stores settings and logs in:
 | `ReplayHUD.ini` | Application and connection settings |
 | `ReplayHUD.log` | OBS connection and application log |
 | `ReplayHUDHook.log` | In-game hook diagnostics |
-| `Runtime\\` | Extracted, build-specific hook DLLs and x86 injector |
-| `Runtime\\D3D8\\` | Hook extracted by the standalone D3D8 proxy |
+| `Runtime\` | Extracted, build-specific hook DLLs and x86 injector |
+| `Runtime\D3D8\` | Hook extracted by the standalone D3D8 proxy |
 
 The OBS password is protected with Windows Data Protection API (DPAPI). It is intended to be decrypted by the same Windows user on the same machine. Copying the INI file to another Windows account or computer does not make the password portable. If the saved password cannot be decrypted, enter it again in Settings.
 
@@ -133,7 +133,7 @@ Backend integration does not mean every game has been validated. Treat the overl
 
 ### Direct3D 8 games
 
-D3D8 games need a proxy DLL placed beside the game's executable. The proxy is self-contained: it embeds the architecture-matching ReplayHUD hook and extracts that hook under `%LOCALAPPDATA%\\ReplayHUD\\Runtime\\D3D8\\` when the game loads it.
+D3D8 games need a proxy DLL placed beside the game's executable. The proxy is self-contained: it embeds the architecture-matching ReplayHUD hook and extracts that hook under `%LOCALAPPDATA%\ReplayHUD\Runtime\D3D8\` when the game loads it.
 
 1. Close the game.
 2. Copy the matching `d3d8.dll` into the game's executable directory:
@@ -193,8 +193,8 @@ cmake -S . -B build-x86 -A Win32 -DREPLAYHUD_BUILD_BACKEND_TESTS=OFF
 cmake --build build-x86 --config Release --target ReplayHUDHook d3d8to9 ReplayHUDInjector32 --parallel
 
 cmake -S . -B build -A x64 -DREPLAYHUD_BUILD_BACKEND_TESTS=OFF ^
-  -DREPLAYHUD_X86_HOOK="%CD%\\build-x86\\Release\\ReplayHUDHook.dll" ^
-  -DREPLAYHUD_X86_INJECTOR="%CD%\\build-x86\\Release\\ReplayHUDInjector32.exe"
+  -DREPLAYHUD_X86_HOOK="%CD%\build-x86\Release\ReplayHUDHook.dll" ^
+  -DREPLAYHUD_X86_INJECTOR="%CD%\build-x86\Release\ReplayHUDInjector32.exe"
 cmake --build build --config Release --parallel
 ```
 
