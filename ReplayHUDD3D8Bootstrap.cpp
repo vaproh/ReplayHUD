@@ -79,10 +79,15 @@ std::wstring ExtractEmbeddedHook(HMODULE proxyModule) {
         written == size && FlushFileBuffers(file) != FALSE;
     CloseHandle(file);
 
-    if (!saved || !MoveFileExW(temporaryPath.c_str(), hookPath.c_str(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    if (!saved) {
         DeleteFileW(temporaryPath.c_str());
         return {};
+    }
+    if (!MoveFileExW(temporaryPath.c_str(), hookPath.c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DeleteFileW(temporaryPath.c_str());
+        // Another game process may have extracted the same build concurrently.
+        return ResourceFileMatches(hookPath, data, size) ? hookPath : std::wstring{};
     }
     return hookPath;
 }
