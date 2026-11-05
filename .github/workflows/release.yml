@@ -30,50 +30,6 @@ jobs:
       - name: Build Release executable
         run: cmake --build build --config Release --parallel
 
-      # Exercise OpenGL through Mesa's D3D12-based driver as well as llvmpipe.
-      - name: Test OpenGL on Mesa's D3D12 driver
-        shell: bash
-        env:
-          GALLIUM_DRIVER: d3d12
-        run: |
-          set -o pipefail
-          ctest --test-dir build -C Release --output-on-failure --timeout 120 -R opengl | tee ctest-d3d12.log
-          if grep Skipped ctest-d3d12.log; then exit 1; fi
-
-      - name: Install Direct3D debug layers
-        shell: pwsh
-        run: Add-WindowsCapability -Online -Name "Tools.Graphics.DirectX~~~~0.0.1.0"
-
-      - name: Test Direct3D 10 through 12 with debug layers
-        shell: bash
-        env:
-          UIH_TEST_D3D_DEBUG: 1
-        run: |
-          ctest --test-dir build -C Release -V -R "d3d1[012]" -E fullscreen --timeout 120 > ctest-debug.log 2>&1 || true
-          grep -E "Test +#|DEBUG LAYER ERROR|tests passed" ctest-debug.log
-          if grep -qE "Skipped|Failed|DEBUG LAYER ERROR" ctest-debug.log; then exit 1; fi
-
-      - name: Install Vulkan validation layer
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $vulkanVersion = "1.4.363.0"
-          curl.exe -fsSL --retry 3 -o vulkansdk.exe "https://sdk.lunarg.com/sdk/download/$vulkanVersion/windows/vulkansdk-windows-X64-$vulkanVersion.exe"
-          $installer = Start-Process -Wait -PassThru -NoNewWindow -FilePath .\vulkansdk.exe -ArgumentList "--root", "C:\VulkanSDK", "--accept-licenses", "--default-answer", "--confirm-command", "install"
-          if ($installer.ExitCode -ne 0) { throw "Vulkan SDK installer exit code $($installer.ExitCode)" }
-          $key = "HKLM:\SOFTWARE\Khronos\Vulkan\ExplicitLayers"
-          New-Item -Path $key -Force | Out-Null
-          New-ItemProperty -Path $key -Name "C:\VulkanSDK\Bin\VkLayer_khronos_validation.json" -Value 0 -PropertyType DWord -Force | Out-Null
-
-      - name: Test Vulkan with validation layer
-        shell: bash
-        env:
-          UIH_TEST_VULKAN_VALIDATION: 1
-        run: |
-          ctest --test-dir build -C Release -V -R vulkan --timeout 120 > ctest-validation.log 2>&1 || true
-          grep -E "Test +#|VALIDATION ERROR|tests passed" ctest-validation.log
-          if grep -qE "Skipped|Failed|VALIDATION ERROR" ctest-validation.log; then exit 1; fi
-
       - name: Build Win32 hook, D3D8 proxy, and injector helper
         shell: pwsh
         run: |
@@ -170,6 +126,50 @@ jobs:
           ctest --test-dir build -C Release --output-on-failure --timeout 120 | tee ctest.log
           # DirectInput cannot observe synthetic key presses on hosted runners.
           if grep Skipped ctest.log | grep -v input_directinput; then exit 1; fi
+
+      # Exercise OpenGL through Mesa's D3D12-based driver as well as llvmpipe.
+      - name: Test OpenGL on Mesa's D3D12 driver
+        shell: bash
+        env:
+          GALLIUM_DRIVER: d3d12
+        run: |
+          set -o pipefail
+          ctest --test-dir build -C Release --output-on-failure --timeout 120 -R opengl | tee ctest-d3d12.log
+          if grep Skipped ctest-d3d12.log; then exit 1; fi
+
+      - name: Install Direct3D debug layers
+        shell: pwsh
+        run: Add-WindowsCapability -Online -Name "Tools.Graphics.DirectX~~~~0.0.1.0"
+
+      - name: Test Direct3D 10 through 12 with debug layers
+        shell: bash
+        env:
+          UIH_TEST_D3D_DEBUG: 1
+        run: |
+          ctest --test-dir build -C Release -V -R "d3d1[012]" -E fullscreen --timeout 120 > ctest-debug.log 2>&1 || true
+          grep -E "Test +#|DEBUG LAYER ERROR|tests passed" ctest-debug.log
+          if grep -qE "Skipped|Failed|DEBUG LAYER ERROR" ctest-debug.log; then exit 1; fi
+
+      - name: Install Vulkan validation layer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $vulkanVersion = "1.4.363.0"
+          curl.exe -fsSL --retry 3 -o vulkansdk.exe "https://sdk.lunarg.com/sdk/download/$vulkanVersion/windows/vulkansdk-windows-X64-$vulkanVersion.exe"
+          $installer = Start-Process -Wait -PassThru -NoNewWindow -FilePath .\vulkansdk.exe -ArgumentList "--root", "C:\VulkanSDK", "--accept-licenses", "--default-answer", "--confirm-command", "install"
+          if ($installer.ExitCode -ne 0) { throw "Vulkan SDK installer exit code $($installer.ExitCode)" }
+          $key = "HKLM:\SOFTWARE\Khronos\Vulkan\ExplicitLayers"
+          New-Item -Path $key -Force | Out-Null
+          New-ItemProperty -Path $key -Name "C:\VulkanSDK\Bin\VkLayer_khronos_validation.json" -Value 0 -PropertyType DWord -Force | Out-Null
+
+      - name: Test Vulkan with validation layer
+        shell: bash
+        env:
+          UIH_TEST_VULKAN_VALIDATION: 1
+        run: |
+          ctest --test-dir build -C Release -V -R vulkan --timeout 120 > ctest-validation.log 2>&1 || true
+          grep -E "Test +#|VALIDATION ERROR|tests passed" ctest-validation.log
+          if grep -qE "Skipped|Failed|VALIDATION ERROR" ctest-validation.log; then exit 1; fi
 
       - name: Package release
         shell: pwsh
