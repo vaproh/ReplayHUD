@@ -41,7 +41,7 @@ bool ResourceFileMatches(const std::wstring& path, const BYTE* data, DWORD size)
 
 std::wstring ExtractEmbeddedHook(HMODULE proxyModule) {
     HRSRC resource = FindResourceW(proxyModule,
-        MAKEINTRESOURCEW(IDR_D3D8_REPLAYHUD_HOOK), RT_RCDATA);
+        MAKEINTRESOURCEW(IDR_D3D8_REPLAYHUD_HOOK), MAKEINTRESOURCEW(10));
     if (!resource) return {};
 
     HGLOBAL loaded = LoadResource(proxyModule, resource);
