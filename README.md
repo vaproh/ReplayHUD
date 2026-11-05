@@ -15,7 +15,7 @@ ReplayHUD is a lightweight native Windows notification app for OBS Studio's Repl
 - **Native Windows app:** C++17 and Win32 APIs; no Electron, browser runtime, or .NET runtime.
 - **Embedded icon:** the ReplayHUD icon is compiled into the executable and used for the app, tray, and notification.
 - **Automatic reconnect:** changing the OBS connection settings requests a clean WebSocket shutdown and reconnect.
-- **Experimental game hook companion:** publishes replay text to `ReplayHUDHook.dll`, which can render over D3D11 games when injection succeeds.
+- **Experimental D3D11 game overlay:** a companion DLL uses MinHook to intercept DXGI `Present` and `ResizeBuffers`, then draws replay notifications into the game's back buffer.
 
 ## Requirements
 
@@ -137,14 +137,17 @@ A manual run from the Actions tab builds and uploads workflow artifacts but does
 
 ## Display limitations
 
-ReplayHUD still shows its normal topmost desktop toast window. It now also publishes the active toast to an experimental D3D11 hook companion (`ReplayHUDHook.dll`) and attempts foreground-process injection when a replay is saved.
+ReplayHUD shows its normal topmost desktop toast and can additionally render the active toast inside a compatible D3D11 application's back buffer.
+
+The experimental game overlay now uses the maintained **MinHook v1.3.4** library for instruction-aware function detours instead of copying an arbitrary number of bytes from the DXGI function prologue. It hooks both `IDXGISwapChain::Present` and `IDXGISwapChain::ResizeBuffers`; the latter releases Direct2D's back-buffer reference before the game recreates its swapchain buffers. The shared notification payload uses a process-shared sequence counter so the game thread cannot render a partially updated title or filename.
 
 Important limits:
 
-- Hook rendering currently targets **D3D11 Present** only.
-- Exclusive-fullscreen and borderless-fullscreen visibility depends on successful injection and game/anti-cheat policy.
-- Anti-cheat protected titles may block or terminate external overlay injections.
-- If injection fails, ReplayHUD continues using the regular desktop toast behavior.
+- This companion currently supports **64-bit Direct3D 11 / DXGI applications only**. It does not support Direct3D 12, Vulkan, OpenGL, or 32-bit processes.
+- Borderless-fullscreen is the first configuration to test. Exclusive-fullscreen visibility depends on the display mode, driver, and application.
+- Protected games and anti-cheat systems may block third-party overlays. ReplayHUD does not attempt to bypass those protections; use only titles where overlays are permitted.
+- Hook initialization diagnostics are written to `%LOCALAPPDATA%\\ReplayHUD\\ReplayHUDHook.log` in the target process.
+- If injection or hook initialization fails, ReplayHUD continues using the regular desktop toast behavior.
 
 ## Troubleshooting
 
