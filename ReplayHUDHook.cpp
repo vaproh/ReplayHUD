@@ -23,6 +23,7 @@ HANDLE g_overlayMapping = nullptr;
 HANDLE g_overlayMutex = nullptr;
 std::atomic<HANDLE> g_overlayReadyEvent{ nullptr };
 std::atomic<unsigned int> g_readyEventOpenAttempts{ 0 };
+std::atomic_bool g_loggedFirstFrame{ false };
 const replayhud::OverlayPayload* g_overlayPayload = nullptr;
 
 void LogHook(const wchar_t* message) {
@@ -177,6 +178,8 @@ void DrawOverlay() {
     const ImVec2 subtitlePosition(left + 20.0f, top + 57.0f);
     draw->AddText(titlePosition, IM_COL32(240, 243, 247, 255), title.c_str());
     draw->AddText(subtitlePosition, IM_COL32(157, 166, 180, 255), subtitle.c_str());
+    if (!g_loggedFirstFrame.exchange(true, std::memory_order_relaxed))
+        LogHook(L"First in-game notification frame rendered.");
     SignalOverlayReady();
 }
 
