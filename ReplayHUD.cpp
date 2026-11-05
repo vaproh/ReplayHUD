@@ -323,23 +323,45 @@ bool InjectHookIntoProcess(DWORD processId, const std::wstring& hookDllPath) {
     return completed && remoteResult != 0;
 }
 
-bool IsReplayHUDHookLoaded(DWORD processId) {
+bool InspectOverlayTargetModules(DWORD processId, bool& hookLoaded) {
+    hookLoaded = false;
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, processId);
     if (snapshot == INVALID_HANDLE_VALUE) return false;
 
+    static constexpr const wchar_t* graphicsModules[] = {
+        L"d3d8.dll", L"d3d9.dll", L"d3d10.dll", L"d3d10_1.dll",
+        L"d3d11.dll", L"d3d12.dll", L"vulkan-1.dll", L"opengl32.dll"
+    };
+    static constexpr const wchar_t* protectedModules[] = {
+        L"EasyAntiCheat_EOS.dll", L"EasyAntiCheat_x64.dll", L"EasyAntiCheat.dll",
+        L"BEClient_x64.dll", L"BEService.dll", L"BattlEye.dll",
+        L"FACEIT.dll", L"FACEITClient.dll"
+    };
+
+    bool graphicsRuntimeLoaded = false;
+    bool protectedRuntimeLoaded = false;
     MODULEENTRY32W module{};
     module.dwSize = sizeof(module);
-    bool found = false;
     if (Module32FirstW(snapshot, &module)) {
         do {
-            if (_wcsicmp(module.szModule, L"ReplayHUDHook.dll") == 0) {
-                found = true;
-                break;
+            if (_wcsicmp(module.szModule, L"ReplayHUDHook.dll") == 0)
+                hookLoaded = true;
+            for (const wchar_t* name : graphicsModules) {
+                if (_wcsicmp(module.szModule, name) == 0) {
+                    graphicsRuntimeLoaded = true;
+                    break;
+                }
+            }
+            for (const wchar_t* name : protectedModules) {
+                if (_wcsicmp(module.szModule, name) == 0) {
+                    protectedRuntimeLoaded = true;
+                    break;
+                }
             }
         } while (Module32NextW(snapshot, &module));
     }
     CloseHandle(snapshot);
-    return found;
+    return graphicsRuntimeLoaded && !protectedRuntimeLoaded;
 }
 
 void EnsureForegroundHookInjected() {
@@ -353,6 +375,9 @@ void EnsureForegroundHookInjected() {
     DWORD processId = 0;
     GetWindowThreadProcessId(foreground, &processId);
     if (!processId || processId == GetCurrentProcessId()) return;
+
+    bool hookAlreadyLoaded = false;
+    if (!InspectOverlayTargetModules(processId, hookAlreadyLoaded)) return;
 
     {
         std::lock_guard<std::mutex> lock(g_injectedProcessesMutex);
@@ -378,7 +403,7 @@ void EnsureForegroundHookInjected() {
         }
     };
 
-    if (IsReplayHUDHookLoaded(processId)) {
+    if (hookAlreadyLoaded) {
         rememberProcess();
         return;
     }
