@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <type_traits>
 
 namespace replayhud {
 
@@ -14,13 +15,15 @@ constexpr size_t kOverlaySubtitleLength = 256;
 // Shared between ReplayHUD.exe and ReplayHUDHook.dll. All payload reads and
 // writes are protected by the named mutex; no cross-process C++ data races.
 struct OverlayPayload {
-    ULONG version = kOverlayPayloadVersion;
-    ULONG active = 0;
-    ULONGLONG expiresAtTick = 0;
-    LONG position = 0; // 0 TR, 1 TL, 2 BR, 3 BL
-    LONG marginPx = 24;
-    WCHAR title[kOverlayTitleLength]{};
-    WCHAR subtitle[kOverlaySubtitleLength]{};
+    ULONG version;
+    ULONG active;
+    ULONGLONG expiresAtTick;
+    LONG position; // 0 TR, 1 TL, 2 BR, 3 BL
+    LONG marginPx;
+    WCHAR title[kOverlayTitleLength];
+    WCHAR subtitle[kOverlaySubtitleLength];
 };
+
+static_assert(std::is_trivially_copyable_v<OverlayPayload>);
 
 } // namespace replayhud
