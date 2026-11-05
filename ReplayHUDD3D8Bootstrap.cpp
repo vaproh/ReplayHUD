@@ -2,6 +2,7 @@
 #define NOMINMAX
 #include <windows.h>
 
+#include <cwchar>
 #include <string>
 
 namespace {
