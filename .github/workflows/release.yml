@@ -21,10 +21,54 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure CMake
-        run: cmake -S . -B build -A x64
+        run: cmake -S . -B build -A x64 -DUIH_BUILD_TESTS=ON
 
       - name: Build Release executable
         run: cmake --build build --config Release --parallel
+
+      - name: Test Direct3D backends with WARP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $hostExe = "build/tests/Release/uih_host.exe"
+          foreach ($api in @("d3d9", "d3d10", "d3d11", "d3d12")) {
+            Write-Host "Testing $api with the Windows software rasterizer"
+            & $hostExe --api $api --warp --capture
+            if ($LASTEXITCODE -ne 0) { throw "$api backend test failed with exit code $LASTEXITCODE" }
+          }
+
+      - name: Install Mesa and Vulkan software drivers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $mesaVersion = "26.2.4"
+          $vulkanVersion = "1.4.363.0"
+          curl.exe -fsSL --retry 3 -o mesa.7z "https://github.com/pal1000/mesa-dist-win/releases/download/$mesaVersion/mesa3d-$mesaVersion-release-msvc.7z"
+          7z x mesa.7z -omesa | Out-Null
+          curl.exe -fsSL --retry 3 -o vulkan.zip "https://sdk.lunarg.com/sdk/download/$vulkanVersion/windows/vulkan-runtime-components.zip"
+          Expand-Archive vulkan.zip vulkan
+          $tests = "build/tests/Release"
+          Copy-Item mesa/x64/opengl32.dll, mesa/x64/libgallium_wgl.dll, mesa/x64/dxil.dll $tests
+          $loader = (Get-ChildItem vulkan -Recurse -Filter vulkan-1.dll | Where-Object { $_.Directory.Name -eq "x64" } | Select-Object -First 1).FullName
+          if (!$loader) { throw "64-bit Vulkan loader was not found in the runtime package." }
+          Copy-Item $loader $tests
+          $icd = (Get-ChildItem mesa/x64 -Filter "lvp_icd.*.json" | Select-Object -First 1).FullName
+          if (!$icd) { throw "Lavapipe ICD manifest was not found in the Mesa package." }
+          $registry = "HKLM:\SOFTWARE\Khronos\Vulkan\Drivers"
+          New-Item -Path $registry -Force | Out-Null
+          New-ItemProperty -Path $registry -Name $icd -Value 0 -PropertyType DWord -Force | Out-Null
+
+      - name: Test Vulkan and OpenGL backends
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $hostExe = "build/tests/Release/uih_host.exe"
+          $env:GALLIUM_DRIVER = "llvmpipe"
+          foreach ($api in @("opengl", "vulkan")) {
+            Write-Host "Testing $api backend with Mesa software rendering"
+            & $hostExe --api $api --capture
+            if ($LASTEXITCODE -ne 0) { throw "$api backend test failed with exit code $LASTEXITCODE" }
+          }
 
       - name: Package release
         shell: pwsh
