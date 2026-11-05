@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Windows x64
+    name: Build Windows x64 and x86
     runs-on: windows-latest
     timeout-minutes: 90
     env:
