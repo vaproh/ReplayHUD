@@ -19,13 +19,13 @@ ReplayHUD is a lightweight native Windows notification app for OBS Studio's Repl
 
 ## Requirements
 
-- Windows 10 version 1703 or newer, 64-bit.
+- Windows 10 version 1703 or newer, 64-bit host OS. The package includes x64 and x86 game hooks.
 - OBS Studio with the built-in WebSocket server (OBS Studio 28 or newer is recommended).
 - OBS Replay Buffer enabled and started.
 
 ## Download
 
-Download `ReplayHUD-Windows-x64.zip` or `ReplayHUD.exe` from the repository's [Releases](../../releases) page. Extract the ZIP and run `ReplayHUD.exe`.
+Download `ReplayHUD-Windows.zip` from the repository's [Releases](../../releases) page. Extract the ZIP and run `ReplayHUD.exe`. The x86 helper and both architecture-specific D3D8 proxies are included.
 
 On first launch, ReplayHUD starts in the system tray. Click the tray icon with the right mouse button and choose **Settings...**.
 
@@ -102,6 +102,10 @@ The executable and hook companion DLL are created at:
 ```text
 build\Release\ReplayHUD.exe
 build\Release\ReplayHUDHook.dll
+build\d3d8-proxy\Release\d3d8.dll
+build-x86\Release\ReplayHUDInjector32.exe
+build-x86\Release\ReplayHUDHook.dll
+build-x86\d3d8-proxy\Release\d3d8.dll
 ```
 
 You can also build directly with CMake:
@@ -111,7 +115,7 @@ cmake -S . -B build -A x64
 cmake --build build --config Release --parallel
 ```
 
-The build uses the static MSVC runtime (`/MT`). CMake fetches the pinned MinHook v1.3.4 source at configure time. The application icon and Windows file-version metadata are embedded from `assets/ReplayHUD.ico` and `ReplayHUD.rc.in`.
+The build uses the static MSVC runtime (`/MT`). CMake fetches pinned revisions of Universal Dear ImGui Hook and d3d8to9. The former provides the D3D9/10/11/12, Vulkan and OpenGL renderers; the latter translates D3D8 to D3D9. The x86 build supplies a 32-bit hook and helper injector for legacy 32-bit games. The application icon and Windows file-version metadata are embedded from `assets/ReplayHUD.ico` and `ReplayHUD.rc.in`.
 
 ## Automated GitHub Releases
 
@@ -128,20 +132,20 @@ git push origin v1.1.0
 
 For a tagged build, GitHub Actions:
 
-1. Configures and compiles the x64 Release executable on a Windows runner.
-2. Packages `ReplayHUD.exe`, `ReplayHUDHook.dll`, `README.md`, and `LICENSE.txt` into `ReplayHUD-Windows-x64.zip`.
-3. Publishes the executable and ZIP to a GitHub Release.
-4. Generates release notes automatically from repository changes.
+1. Builds the x64 application and hook, plus x86 hook, helper injector, and D3D8 proxy.
+2. Runs WARP smoke tests for D3D9/10/11/12 and software-driver smoke tests for Vulkan/OpenGL.
+3. Packages both architectures, the D3D8 compatibility proxy, and required third-party license notices into `ReplayHUD-Windows.zip`.
+4. Publishes the ZIP to a GitHub Release and generates release notes.
 
 A manual run from the Actions tab builds and uploads workflow artifacts but does not publish a GitHub Release. The workflow requests `contents: write`; repository Actions policy must allow release publishing.
 
 ## In-game overlay API support
 
-The in-game overlay uses the MIT-licensed [Universal Dear ImGui Hook](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook) v2.0.0 as its graphics interception and rendering layer. ReplayHUD supplies the notification UI and shared-memory bridge; the backend library handles API detection, present hooks, device lifecycle, and graphics-state management.
+The in-game overlay uses a pinned revision of the MIT-licensed [Universal Dear ImGui Hook](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook) as its graphics interception and rendering layer. ReplayHUD supplies the notification UI and shared-memory bridge; the backend library handles API detection, present hooks, device lifecycle, and graphics-state management.
 
 | Graphics API | Status in this build |
 |---|---|
-| Direct3D 8 | Not yet supported natively. A D3D8-to-D3D9 compatibility path is being evaluated; it is not enabled automatically. |
+| Direct3D 8 | Supported through the bundled d3d8to9 proxy, which translates D3D8 to D3D9. Requires per-game proxy installation. |
 | Direct3D 9 | Backend integrated; requires in-game validation |
 | Direct3D 10 | Backend integrated; requires in-game validation |
 | Direct3D 11 | Backend integrated; requires in-game validation |
@@ -149,12 +153,13 @@ The in-game overlay uses the MIT-licensed [Universal Dear ImGui Hook](https://gi
 | Vulkan | Backend integrated; requires in-game validation |
 | OpenGL 3.0+ (WGL) | Backend integrated; requires in-game validation |
 
-The backend library's own automated host tests cover API-specific rendering, swap-chain/device recreation, resize handling, and several failure scenarios. ReplayHUD's integration still needs its own end-to-end tests with OBS notifications in real games.
+The backend library's automated host tests cover API-specific rendering, swap-chain/device recreation, resize handling, and several failure scenarios. ReplayHUD's own notification-to-renderer integration still needs end-to-end validation with OBS notifications in real games.
 
 Important limits:
 
-- This release is Windows x64 only. A 32-bit game needs a separately built x86 hook DLL; the current injector intentionally rejects WOW64 targets.
-- Direct3D 8 is not included in the supported list yet. The established compatibility route is to translate D3D8 to D3D9 with a separate wrapper such as [d3d8to9](https://github.com/crosire/d3d8to9), but that has per-game deployment and compatibility trade-offs.
+- The main ReplayHUD app is x64. It launches the bundled x86 helper to inject the x86 hook into 32-bit game processes.
+- For D3D8 games, copy the architecture-matching `d3d8.dll` and `ReplayHUDHook.dll` from the package into the game's executable directory. Use the package root files for 64-bit games and the `x86` folder for 32-bit games. The proxy loads the hook from the same directory and translates D3D8 rendering to D3D9.
+- The D3D8 proxy is an API translation layer, not native D3D8 rendering. Some old titles behave differently under translation; d3d8to9 may also need the legacy DirectX End-User Runtime for D3DX shader helpers. Remove the local `d3d8.dll` to revert to the system D3D8 runtime.
 - HDR output, unusual swap-chain formats, overlays from other tools, and games with multiple render windows may still expose compatibility issues.
 - Exclusive-fullscreen visibility depends on the display mode, driver, and application. Borderless-fullscreen is the first configuration to validate.
 - Protected games and anti-cheat systems may block third-party overlays. ReplayHUD does not attempt to bypass those protections; use only titles where overlays are permitted.
