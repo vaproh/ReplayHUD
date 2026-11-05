@@ -15,7 +15,7 @@ ReplayHUD is a lightweight native Windows notification app for OBS Studio's Repl
 - **Native Windows app:** C++17 and Win32 APIs; no Electron, browser runtime, or .NET runtime.
 - **Embedded icon:** the ReplayHUD icon is compiled into the executable and used for the app, tray, and notification.
 - **Automatic reconnect:** changing the OBS connection settings requests a clean WebSocket shutdown and reconnect.
-- **Experimental D3D11 game overlay:** a companion DLL uses MinHook to intercept DXGI `Present` and `ResizeBuffers`, then draws replay notifications into the game's back buffer.
+- **Experimental D3D11 game overlay:** a companion DLL uses MinHook to intercept DXGI `Present`, `Present1`, and `ResizeBuffers`, then draws replay notifications into the game's back buffer.
 
 ## Requirements
 
@@ -139,7 +139,7 @@ A manual run from the Actions tab builds and uploads workflow artifacts but does
 
 ReplayHUD shows its normal topmost desktop toast and can additionally render the active toast inside a compatible D3D11 application's back buffer.
 
-The experimental game overlay now uses the maintained **MinHook v1.3.4** library for instruction-aware function detours instead of copying an arbitrary number of bytes from the DXGI function prologue. It hooks both `IDXGISwapChain::Present` and `IDXGISwapChain::ResizeBuffers`; the latter releases Direct2D's back-buffer reference before the game recreates its swapchain buffers. The shared notification payload uses a process-shared sequence counter so the game thread cannot render a partially updated title or filename.
+The experimental game overlay now uses the maintained **MinHook v1.3.4** library for instruction-aware function detours instead of copying an arbitrary number of bytes from the DXGI function prologue. It hooks `IDXGISwapChain::Present`, `IDXGISwapChain1::Present1`, and `IDXGISwapChain::ResizeBuffers`; the latter releases Direct2D's back-buffer reference before the game recreates its swapchain buffers. The shared notification payload uses a process-shared sequence counter so the game thread cannot render a partially updated title or filename.
 
 Important limits:
 
