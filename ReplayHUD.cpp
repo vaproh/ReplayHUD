@@ -208,7 +208,7 @@ bool InitializeOverlayBridge() {
     g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
     g_overlayPayload->active = 0;
     g_overlayPayload->expiresAtTick = 0;
-    g_overlayPayload->sequence = 0;
+    g_overlayPayload->sequence = GetTickCount64();
     g_overlayPayload->position = 0;
     g_overlayPayload->marginPx = 24;
     g_overlayPayload->title[0] = L'\0';
