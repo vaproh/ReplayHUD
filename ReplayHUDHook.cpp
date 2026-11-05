@@ -353,12 +353,17 @@ bool InstallPresentHook() {
         return false;
     }
 
-    mhStatus = MH_EnableHook(MH_ALL_HOOKS);
+    mhStatus = MH_EnableHook(presentTarget);
+    if (mhStatus == MH_OK) {
+        mhStatus = MH_EnableHook(resizeTarget);
+    }
     SafeRelease(context);
     SafeRelease(device);
     SafeRelease(swapChain);
 
     if (mhStatus != MH_OK) {
+        MH_DisableHook(presentTarget);
+        MH_DisableHook(resizeTarget);
         MH_RemoveHook(presentTarget);
         MH_RemoveHook(resizeTarget);
         LogHook(L"MinHook could not enable the DXGI hooks.");
