@@ -165,6 +165,7 @@ add_custom_command(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateD3D8Resources.cmake"
     VERBATIM
 )
+set_source_files_properties("${REPLAYHUD_D3D8_RESOURCES_RC}" PROPERTIES GENERATED TRUE)
 target_sources(d3d8to9 PRIVATE "${REPLAYHUD_D3D8_RESOURCES_RC}")
 target_include_directories(d3d8to9 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -197,6 +198,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 8)
             "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateAppResources.cmake"
         VERBATIM
     )
+    set_source_files_properties("${REPLAYHUD_APP_RESOURCES_RC}" PROPERTIES GENERATED TRUE)
     target_sources(ReplayHUD PRIVATE "${REPLAYHUD_APP_RESOURCES_RC}")
     add_dependencies(ReplayHUD ReplayHUDHook)
 endif()
