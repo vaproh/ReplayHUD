@@ -13,7 +13,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: replayhud-${{ github.ref }}
+  # Main pushes get unique groups so cancel_obsolete can start and cancel stale runs.
+  # PRs, tags, and manual runs still serialize per ref.
+  group: replayhud-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.run_id || github.ref }}
   cancel-in-progress: true
 
 jobs:
