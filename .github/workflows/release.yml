@@ -75,7 +75,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          cmake -S . -B build-x86 -A Win32 -DUIH_BUILD_TESTS=OFF
+          cmake -S . -B build-x86 -A Win32 -DREPLAYHUD_BUILD_BACKEND_TESTS=OFF
           if ($LASTEXITCODE -ne 0) { throw "Win32 CMake configuration failed." }
           cmake --build build-x86 --config Release --target ReplayHUDHook d3d8to9 ReplayHUDInjector32 --parallel
           if ($LASTEXITCODE -ne 0) { throw "Win32 hook/proxy/helper build failed." }
