@@ -17,7 +17,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  cancel_obsolete:
+    name: Cancel superseded main builds
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Cancel older main push runs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          current_run="$GITHUB_RUN_ID"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs?branch=main&per_page=100" |
+            jq -r --arg current "$current_run" '.workflow_runs[] | select((.id|tostring) != $current and .event == "push" and (.status == "in_progress" or .status == "queued")) | .id' |
+            while read -r run_id; do
+              [ -n "$run_id" ] || continue
+              echo "Cancelling obsolete main build $run_id"
+              gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/cancel"
+            done
+
   build:
+    needs: cancel_obsolete
+    if: always() && (needs.cancel_obsolete.result == 'success' || needs.cancel_obsolete.result == 'skipped')
     name: Build Windows x64 and x86
     runs-on: windows-latest
     timeout-minutes: 90
@@ -218,6 +241,27 @@ jobs:
             release/**
             ReplayHUD-Windows.zip
           if-no-files-found: error
+
+  cleanup_branches:
+    name: Delete temporary development branches
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Delete temporary branches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for branch in "fix/d3d11-present-hook" "fix/foreground-fullscreen-hook"; do
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" >/dev/null 2>&1; then
+              echo "Deleting $branch"
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
+            else
+              echo "$branch is already absent"
+            fi
+          done
 
   release:
     name: Publish GitHub Release
