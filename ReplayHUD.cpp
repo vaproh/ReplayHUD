@@ -129,6 +129,7 @@ bool g_ownsSmallIcon = false;
 std::thread g_worker;
 std::atomic_bool g_running{ true };
 std::atomic_bool g_reconfigureRequested{ false };
+std::atomic<int> g_lastReplayBufferState{ -1 };
 HINTERNET g_activeWebSocket = nullptr; // guarded by g_socketMutex; worker owns closing it
 HANDLE g_shutdownEvent = nullptr;
 HANDLE g_reconnectEvent = nullptr;
@@ -1187,7 +1188,12 @@ void PostReplaySaved(const std::wstring& path) {
 
 void PostReplayBufferState(bool active) {
     if (!g_mainWindow) return;
-    PostMessageW(g_mainWindow, kReplayBufferStateMessage, active ? 1 : 0, 0);
+    const int nextState = active ? 1 : 0;
+    // OBS can emit both ReplayBufferStarted/Stopped and ReplayBufferStateChanged
+    // for the same transition. Only publish an actual state change.
+    const int previousState = g_lastReplayBufferState.exchange(nextState, std::memory_order_acq_rel);
+    if (previousState == nextState) return;
+    PostMessageW(g_mainWindow, kReplayBufferStateMessage, nextState, 0);
 }
 
 void ObsWorker() {
