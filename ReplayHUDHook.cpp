@@ -5,290 +5,217 @@
 #define _WIN32_WINNT 0x0A00
 
 #include <windows.h>
-#include <d3d11.h>
-#include <d2d1.h>
-#include <d2d1helper.h>
-#include <dwrite.h>
-#include <dxgi.h>
 
-#include <cwchar>
+#include <algorithm>
+#include <atomic>
 #include <cstring>
-#include <mutex>
+#include <cwchar>
+#include <string>
+
+#include <imgui.h>
+#include <uih.h>
 
 #include "ReplayHUDOverlayBridge.h"
 
-#pragma comment(lib, "d3d11.lib")
-#pragma comment(lib, "d2d1.lib")
-#pragma comment(lib, "dwrite.lib")
-#pragma comment(lib, "dxgi.lib")
-
 namespace {
 
-template <typename T>
-void SafeRelease(T*& value) {
-    if (value) {
-        value->Release();
-        value = nullptr;
-    }
-}
-
-using PresentFn = HRESULT(__stdcall*)(IDXGISwapChain*, UINT, UINT);
-
-constexpr SIZE_T kPatchSize = 12;
-
-PresentFn g_originalPresent = nullptr;
-void* g_presentTarget = nullptr;
-BYTE g_originalPatch[kPatchSize]{};
-void* g_trampoline = nullptr;
-std::mutex g_renderMutex;
-
 HANDLE g_overlayMapping = nullptr;
+HANDLE g_overlayMutex = nullptr;
+std::atomic<HANDLE> g_overlayReadyEvent{ nullptr };
+std::atomic<unsigned int> g_mappingOpenAttempts{ 0 };
+std::atomic<unsigned int> g_readyEventOpenAttempts{ 0 };
+std::atomic_bool g_loggedFirstFrame{ false };
 const replayhud::OverlayPayload* g_overlayPayload = nullptr;
 
-ID2D1Factory* g_d2dFactory = nullptr;
-IDWriteFactory* g_writeFactory = nullptr;
-ID2D1RenderTarget* g_renderTarget = nullptr;
-ID2D1SolidColorBrush* g_backgroundBrush = nullptr;
-ID2D1SolidColorBrush* g_borderBrush = nullptr;
-ID2D1SolidColorBrush* g_titleBrush = nullptr;
-ID2D1SolidColorBrush* g_subtitleBrush = nullptr;
-IDWriteTextFormat* g_titleFormat = nullptr;
-IDWriteTextFormat* g_subtitleFormat = nullptr;
-IDXGISwapChain* g_boundSwapChain = nullptr;
+void LogHook(const wchar_t* message) {
+    OutputDebugStringW(message);
+    OutputDebugStringW(L"\r\n");
+
+    wchar_t localAppData[MAX_PATH]{};
+    const DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) return;
+
+    std::wstring directory = localAppData;
+    directory += L"\\ReplayHUD";
+    CreateDirectoryW(directory.c_str(), nullptr);
+    const std::wstring path = directory + L"\\ReplayHUDHook.log";
+
+    HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+
+    SYSTEMTIME time{};
+    GetLocalTime(&time);
+    wchar_t line[1024]{};
+    swprintf_s(line, L"[%04u-%02u-%02u %02u:%02u:%02u] PID %lu: %s\r\n",
+        time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute,
+        time.wSecond, GetCurrentProcessId(), message);
+
+    const int bytes = WideCharToMultiByte(CP_UTF8, 0, line, -1, nullptr, 0, nullptr, nullptr);
+    if (bytes > 1) {
+        std::string utf8(static_cast<size_t>(bytes), '\0');
+        if (WideCharToMultiByte(CP_UTF8, 0, line, -1, utf8.data(), bytes, nullptr, nullptr) > 0) {
+            utf8.pop_back();
+            DWORD written = 0;
+            WriteFile(file, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr);
+        }
+    }
+    CloseHandle(file);
+}
 
 bool InitializeOverlayMapping() {
     if (g_overlayPayload) return true;
+    const unsigned int attempt = g_mappingOpenAttempts.fetch_add(1, std::memory_order_relaxed);
+    if (attempt != 0 && attempt % 10 != 0) return false;
+    g_overlayMutex = OpenMutexW(SYNCHRONIZE | MUTEX_MODIFY_STATE, FALSE,
+        replayhud::kOverlayMutexName);
+    if (!g_overlayMutex) return false;
     g_overlayMapping = OpenFileMappingW(FILE_MAP_READ, FALSE, replayhud::kOverlayMappingName);
-    if (!g_overlayMapping) return false;
+    if (!g_overlayMapping) {
+        CloseHandle(g_overlayMutex);
+        g_overlayMutex = nullptr;
+        return false;
+    }
     g_overlayPayload = static_cast<const replayhud::OverlayPayload*>(
         MapViewOfFile(g_overlayMapping, FILE_MAP_READ, 0, 0, sizeof(replayhud::OverlayPayload)));
     if (!g_overlayPayload) {
         CloseHandle(g_overlayMapping);
         g_overlayMapping = nullptr;
+        CloseHandle(g_overlayMutex);
+        g_overlayMutex = nullptr;
         return false;
     }
     return true;
 }
 
-void ShutdownOverlayMapping() {
-    if (g_overlayPayload) {
-        UnmapViewOfFile(g_overlayPayload);
-        g_overlayPayload = nullptr;
-    }
-    if (g_overlayMapping) {
-        CloseHandle(g_overlayMapping);
-        g_overlayMapping = nullptr;
-    }
-}
+bool ReadOverlayPayload(replayhud::OverlayPayload& snapshot) {
+    if (!InitializeOverlayMapping() || !g_overlayPayload || !g_overlayMutex) return false;
 
-void ReleaseRenderObjects() {
-    SafeRelease(g_backgroundBrush);
-    SafeRelease(g_borderBrush);
-    SafeRelease(g_titleBrush);
-    SafeRelease(g_subtitleBrush);
-    SafeRelease(g_titleFormat);
-    SafeRelease(g_subtitleFormat);
-    SafeRelease(g_renderTarget);
-    if (g_boundSwapChain) {
-        g_boundSwapChain->Release();
-        g_boundSwapChain = nullptr;
-    }
-}
+    // Never stall the game's render thread waiting for a notification update.
+    const DWORD wait = WaitForSingleObject(g_overlayMutex, 0);
+    if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) return false;
 
-bool EnsureFactories() {
-    if (!g_d2dFactory) {
-        if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &g_d2dFactory))) return false;
-    }
-    if (!g_writeFactory) {
-        if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
-                reinterpret_cast<IUnknown**>(&g_writeFactory)))) return false;
-    }
+    snapshot.version = g_overlayPayload->version;
+    snapshot.active = g_overlayPayload->active;
+    snapshot.expiresAtTick = g_overlayPayload->expiresAtTick;
+    snapshot.position = g_overlayPayload->position;
+    snapshot.marginPx = g_overlayPayload->marginPx;
+    memcpy(snapshot.title, g_overlayPayload->title, sizeof(snapshot.title));
+    memcpy(snapshot.subtitle, g_overlayPayload->subtitle, sizeof(snapshot.subtitle));
+    ReleaseMutex(g_overlayMutex);
     return true;
 }
 
-bool EnsureRenderTarget(IDXGISwapChain* swapChain) {
-    if (!EnsureFactories()) return false;
-    if (g_boundSwapChain != swapChain) {
-        ReleaseRenderObjects();
-    }
-    if (g_renderTarget) return true;
-
-    IDXGISurface* surface = nullptr;
-    if (FAILED(swapChain->GetBuffer(0, __uuidof(IDXGISurface), reinterpret_cast<void**>(&surface)))) {
-        return false;
-    }
-
-    D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
-        D2D1_RENDER_TARGET_TYPE_DEFAULT,
-        D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_PREMULTIPLIED),
-        0.0f, 0.0f);
-    HRESULT hr = g_d2dFactory->CreateDxgiSurfaceRenderTarget(surface, &props, &g_renderTarget);
-    surface->Release();
-    if (FAILED(hr)) return false;
-
-    g_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0x14171D, 0.90f), &g_backgroundBrush);
-    g_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0x363D48, 1.0f), &g_borderBrush);
-    g_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0xF0F3F7, 1.0f), &g_titleBrush);
-    g_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0x9DA6B4, 1.0f), &g_subtitleBrush);
-    if (!g_backgroundBrush || !g_borderBrush || !g_titleBrush || !g_subtitleBrush) return false;
-
-    if (FAILED(g_writeFactory->CreateTextFormat(
-            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, 24.0f, L"", &g_titleFormat))) {
-        return false;
-    }
-    if (FAILED(g_writeFactory->CreateTextFormat(
-            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, 19.0f, L"", &g_subtitleFormat))) {
-        return false;
-    }
-    g_titleFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-    g_subtitleFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-
-    g_boundSwapChain = swapChain;
-    g_boundSwapChain->AddRef();
-    return true;
+std::string WideToUtf8(const wchar_t* text, size_t length) {
+    if (!text || length == 0) return {};
+    const int bytes = WideCharToMultiByte(CP_UTF8, 0, text,
+        static_cast<int>(length), nullptr, 0, nullptr, nullptr);
+    if (bytes <= 0) return {};
+    std::string result(static_cast<size_t>(bytes), '\0');
+    if (!WideCharToMultiByte(CP_UTF8, 0, text, static_cast<int>(length),
+            result.data(), bytes, nullptr, nullptr)) return {};
+    return result;
 }
 
-void DrawOverlay(IDXGISwapChain* swapChain) {
-    if (!InitializeOverlayMapping() || !g_overlayPayload) return;
-    if (g_overlayPayload->version != replayhud::kOverlayPayloadVersion || g_overlayPayload->active == 0) return;
-    if (GetTickCount64() > g_overlayPayload->expiresAtTick) return;
-    if (!EnsureRenderTarget(swapChain) || !g_renderTarget) return;
-
-    D2D1_SIZE_F size = g_renderTarget->GetSize();
-    const float width = 440.0f;
-    const float height = 110.0f;
-    const float margin = 24.0f;
-    const D2D1_ROUNDED_RECT panel{
-        D2D1::RectF(size.width - width - margin, margin, size.width - margin, margin + height), 16.0f, 16.0f
-    };
-    const D2D1_RECT_F titleRect = D2D1::RectF(panel.rect.left + 20.0f, panel.rect.top + 14.0f,
-        panel.rect.right - 20.0f, panel.rect.top + 52.0f);
-    const D2D1_RECT_F subtitleRect = D2D1::RectF(panel.rect.left + 20.0f, panel.rect.top + 50.0f,
-        panel.rect.right - 20.0f, panel.rect.bottom - 14.0f);
-
-    g_renderTarget->BeginDraw();
-    g_renderTarget->FillRoundedRectangle(panel, g_backgroundBrush);
-    g_renderTarget->DrawRoundedRectangle(panel, g_borderBrush, 1.0f);
-    g_renderTarget->DrawTextW(g_overlayPayload->title,
-        static_cast<UINT32>(wcslen(g_overlayPayload->title)), g_titleFormat, titleRect, g_titleBrush);
-    g_renderTarget->DrawTextW(g_overlayPayload->subtitle,
-        static_cast<UINT32>(wcslen(g_overlayPayload->subtitle)), g_subtitleFormat, subtitleRect, g_subtitleBrush);
-    if (g_renderTarget->EndDraw() == D2DERR_RECREATE_TARGET) {
-        ReleaseRenderObjects();
-    }
-}
-
-HRESULT __stdcall HookedPresent(IDXGISwapChain* swapChain, UINT syncInterval, UINT flags) {
-    std::lock_guard<std::mutex> lock(g_renderMutex);
-    DrawOverlay(swapChain);
-    return g_originalPresent ? g_originalPresent(swapChain, syncInterval, flags)
-                             : S_OK;
-}
-
-bool WriteAbsoluteJump(void* source, const void* destination) {
-    DWORD oldProtect = 0;
-    if (!VirtualProtect(source, kPatchSize, PAGE_EXECUTE_READWRITE, &oldProtect)) return false;
-    BYTE patch[kPatchSize] = { 0x48, 0xB8 };
-    *reinterpret_cast<void**>(&patch[2]) = const_cast<void*>(destination);
-    patch[10] = 0xFF;
-    patch[11] = 0xE0;
-    memcpy(source, patch, sizeof(patch));
-    FlushInstructionCache(GetCurrentProcess(), source, kPatchSize);
-    DWORD ignored = 0;
-    VirtualProtect(source, kPatchSize, oldProtect, &ignored);
-    return true;
-}
-
-bool InstallPresentHook() {
-    if (g_originalPresent) return true;
-
-    WNDCLASSW wc{};
-    wc.lpfnWndProc = DefWindowProcW;
-    wc.hInstance = GetModuleHandleW(nullptr);
-    wc.lpszClassName = L"ReplayHUD.HookDummyWindow";
-    RegisterClassW(&wc);
-    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"", WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 64, 64, nullptr, nullptr, wc.hInstance, nullptr);
-    if (!hwnd) return false;
-
-    DXGI_SWAP_CHAIN_DESC desc{};
-    desc.BufferCount = 1;
-    desc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    desc.OutputWindow = hwnd;
-    desc.SampleDesc.Count = 1;
-    desc.Windowed = TRUE;
-    desc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-
-    IDXGISwapChain* swapChain = nullptr;
-    ID3D11Device* device = nullptr;
-    ID3D11DeviceContext* context = nullptr;
-    const D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0 };
-    D3D_FEATURE_LEVEL level{};
-    HRESULT created = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2,
-        D3D11_SDK_VERSION, &desc, &swapChain, &device, &level, &context);
-    DestroyWindow(hwnd);
-    UnregisterClassW(wc.lpszClassName, wc.hInstance);
-    if (FAILED(created) || !swapChain) {
-        SafeRelease(context);
-        SafeRelease(device);
-        SafeRelease(swapChain);
-        return false;
-    }
-
-    void** vtable = *reinterpret_cast<void***>(swapChain);
-    g_presentTarget = vtable[8];
-    memcpy(g_originalPatch, g_presentTarget, kPatchSize);
-
-    g_trampoline = VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-    if (!g_trampoline) {
-        SafeRelease(context);
-        SafeRelease(device);
-        SafeRelease(swapChain);
-        return false;
-    }
-    memcpy(g_trampoline, g_originalPatch, kPatchSize);
-    BYTE* jumpBack = static_cast<BYTE*>(g_trampoline) + kPatchSize;
-    jumpBack[0] = 0x48;
-    jumpBack[1] = 0xB8;
-    *reinterpret_cast<void**>(&jumpBack[2]) = static_cast<BYTE*>(g_presentTarget) + kPatchSize;
-    jumpBack[10] = 0xFF;
-    jumpBack[11] = 0xE0;
-    g_originalPresent = reinterpret_cast<PresentFn>(g_trampoline);
-
-    bool hooked = WriteAbsoluteJump(g_presentTarget, reinterpret_cast<void*>(&HookedPresent));
-    SafeRelease(context);
-    SafeRelease(device);
-    SafeRelease(swapChain);
-    return hooked;
-}
-
-void ShutdownHook() {
-    if (g_presentTarget) {
-        DWORD oldProtect = 0;
-        if (VirtualProtect(g_presentTarget, kPatchSize, PAGE_EXECUTE_READWRITE, &oldProtect)) {
-            memcpy(g_presentTarget, g_originalPatch, kPatchSize);
-            FlushInstructionCache(GetCurrentProcess(), g_presentTarget, kPatchSize);
-            DWORD ignored = 0;
-            VirtualProtect(g_presentTarget, kPatchSize, oldProtect, &ignored);
+void SignalOverlayReady() {
+    HANDLE event = g_overlayReadyEvent.load(std::memory_order_acquire);
+    if (!event) {
+        const unsigned int attempt = g_readyEventOpenAttempts.fetch_add(1, std::memory_order_relaxed);
+        if (attempt == 0 || attempt % 5 == 0) {
+            HANDLE opened = OpenEventW(EVENT_MODIFY_STATE, FALSE, replayhud::kOverlayReadyEventName);
+            if (opened) {
+                HANDLE expected = nullptr;
+                if (!g_overlayReadyEvent.compare_exchange_strong(expected, opened,
+                        std::memory_order_acq_rel, std::memory_order_acquire)) {
+                    CloseHandle(opened);
+                }
+                event = g_overlayReadyEvent.load(std::memory_order_acquire);
+            }
         }
     }
-    g_presentTarget = nullptr;
-    g_originalPresent = nullptr;
-    if (g_trampoline) {
-        VirtualFree(g_trampoline, 0, MEM_RELEASE);
-        g_trampoline = nullptr;
-    }
-    ReleaseRenderObjects();
-    SafeRelease(g_d2dFactory);
-    SafeRelease(g_writeFactory);
-    ShutdownOverlayMapping();
+    if (event) SetEvent(event);
+}
+
+void DrawOverlay() {
+    // A process can remain hooked after the player alt-tabs away. Only draw
+    // into the currently foreground process, never behind another game/app.
+    HWND foreground = GetForegroundWindow();
+    DWORD foregroundPid = 0;
+    if (!foreground) return;
+    GetWindowThreadProcessId(foreground, &foregroundPid);
+    if (foregroundPid != GetCurrentProcessId()) return;
+
+    replayhud::OverlayPayload payload{};
+    if (!ReadOverlayPayload(payload)) return;
+    if (payload.version != replayhud::kOverlayPayloadVersion || payload.active == 0) return;
+    if (GetTickCount64() > payload.expiresAtTick) return;
+
+    const std::string title = WideToUtf8(payload.title,
+        wcsnlen_s(payload.title, _countof(payload.title)));
+    const std::string subtitle = WideToUtf8(payload.subtitle,
+        wcsnlen_s(payload.subtitle, _countof(payload.subtitle)));
+    if (title.empty() && subtitle.empty()) return;
+
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+    const ImVec2 display = ImGui::GetIO().DisplaySize;
+    if (!draw || display.x <= 0.0f || display.y <= 0.0f) return;
+
+    constexpr float panelWidth = 440.0f;
+    constexpr float panelHeight = 110.0f;
+    const float margin = static_cast<float>((std::clamp)(payload.marginPx, 8L, 200L));
+    const float width = (std::min)(panelWidth, (std::max)(1.0f, display.x - margin * 2.0f));
+    const float height = (std::min)(panelHeight, (std::max)(1.0f, display.y - margin * 2.0f));
+    const LONG position = (std::clamp)(payload.position, 0L, 3L);
+    const bool leftAligned = (position == 1 || position == 3);
+    const bool bottomAligned = (position >= 2);
+    const float left = leftAligned ? margin : (std::max)(margin, display.x - width - margin);
+    const float top = bottomAligned ? (std::max)(margin, display.y - height - margin) : margin;
+    const ImVec2 min(left, top);
+    const ImVec2 max(left + width, top + height);
+
+    // Draw the outline as a filled ring instead of a 1 px stroked path.
+    // A stroked rounded rect can show anti-aliased pinholes where corner
+    // segments meet on some render backends / fractional DPI scales.
+    constexpr float borderWidth = 1.5f;
+    const ImU32 borderColor = IM_COL32(75, 84, 99, 255);
+    const ImU32 panelColor = IM_COL32(20, 23, 29, 238);
+    draw->AddRectFilled(min, max, borderColor, 16.0f, ImDrawFlags_RoundCornersAll);
+    const ImVec2 innerMin(min.x + borderWidth, min.y + borderWidth);
+    const ImVec2 innerMax(max.x - borderWidth, max.y - borderWidth);
+    draw->AddRectFilled(innerMin, innerMax, panelColor, 16.0f - borderWidth,
+        ImDrawFlags_RoundCornersAll);
+
+    const ImVec2 titlePosition(left + 20.0f, top + 17.0f);
+    const ImVec2 subtitlePosition(left + 20.0f, top + 57.0f);
+    draw->PushClipRect(ImVec2(left + 16.0f, top + 10.0f),
+        ImVec2(left + width - 16.0f, top + height - 10.0f), true);
+    draw->AddText(titlePosition, IM_COL32(240, 243, 247, 255), title.c_str());
+    draw->AddText(subtitlePosition, IM_COL32(157, 166, 180, 255), subtitle.c_str());
+    draw->PopClipRect();
+    SignalOverlayReady();
+    if (!g_loggedFirstFrame.exchange(true, std::memory_order_relaxed))
+        LogHook(L"First in-game notification frame rendered.");
 }
 
 DWORD WINAPI HookThreadProc(LPVOID) {
-    InstallPresentHook();
+    if (!InitializeOverlayMapping()) {
+        LogHook(L"Could not open the shared notification mapping; overlay will remain inactive.");
+    }
+
+    uih::Config config{};
+    config.module = nullptr;
+    config.backend = uih::Backend::None;
+    config.menuKey = 0;
+    config.unloadKey = 0;
+    config.menuButtons = 0;
+    config.debugLog = GetEnvironmentVariableW(L"REPLAYHUD_DEBUG", nullptr, 0) > 0;
+    config.render = DrawOverlay;
+
+    // Universal Dear ImGui Hook owns API detection, hook installation, device
+    // lifecycle, and renderer state restoration for its supported backends.
+    uih::Start(config);
+    LogHook(L"Multi-API overlay hook startup requested.");
     return 0;
 }
 
@@ -296,12 +223,15 @@ DWORD WINAPI HookThreadProc(LPVOID) {
 
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
     switch (reason) {
-    case DLL_PROCESS_ATTACH:
+    case DLL_PROCESS_ATTACH: {
         DisableThreadLibraryCalls(module);
-        CreateThread(nullptr, 0, HookThreadProc, nullptr, 0, nullptr);
+        HANDLE thread = CreateThread(nullptr, 0, HookThreadProc, nullptr, 0, nullptr);
+        if (thread) CloseHandle(thread);
+        else OutputDebugStringW(L"ReplayHUD: failed to create overlay initialization thread.\r\n");
         break;
+    }
     case DLL_PROCESS_DETACH:
-        ShutdownHook();
+        // Do not tear down graphics hooks while the loader lock is held.
         break;
     default:
         break;

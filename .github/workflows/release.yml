@@ -1,7 +1,10 @@
 name: Build and Release
 
 on:
+  pull_request:
+    branches: [main]
   push:
+    branches: ["**"]
     tags:
       - "v*"
   workflow_dispatch:
@@ -11,47 +14,229 @@ permissions:
 
 jobs:
   build:
-    name: Build Windows x64
+    name: Build Windows x64 and x86
     runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      UIH_TEST_FULLSCREEN: 1
 
     steps:
       - name: Check out source
         uses: actions/checkout@v4
 
       - name: Configure CMake
-        run: cmake -S . -B build -A x64
+        run: cmake -S . -B build -A x64 -DREPLAYHUD_BUILD_BACKEND_TESTS=ON
 
       - name: Build Release executable
         run: cmake --build build --config Release --parallel
+
+      - name: Build Win32 hook, D3D8 proxy, and injector helper
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          cmake -S . -B build-x86 -A Win32 -DREPLAYHUD_BUILD_BACKEND_TESTS=ON
+          if ($LASTEXITCODE -ne 0) { throw "Win32 CMake configuration failed." }
+          cmake --build build-x86 --config Release --target ReplayHUDHook d3d8to9 ReplayHUDInjector32 uih_host --parallel
+          if ($LASTEXITCODE -ne 0) { throw "Win32 hook/proxy/helper build failed." }
+
+      - name: Test Direct3D backends with WARP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $hostExe = "build/_deps/universal_imgui_hook-build/tests/Release/uih_host.exe"
+          Write-Host "Testing D3D9 using the hosted Direct3D device"
+          & $hostExe --api d3d9 --capture
+          if ($LASTEXITCODE -ne 0) { throw "D3D9 backend test failed with exit code $LASTEXITCODE" }
+          foreach ($api in @("d3d10", "d3d11", "d3d12")) {
+            Write-Host "Testing $api with the Windows software rasterizer"
+            & $hostExe --api $api --warp --capture
+            if ($LASTEXITCODE -ne 0) { throw "$api backend test failed with exit code $LASTEXITCODE" }
+          }
+
+      - name: Install Mesa and Vulkan software drivers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $mesaVersion = "26.2.4"
+          $vulkanVersion = "1.4.363.0"
+          curl.exe -fsSL --retry 3 -o mesa.7z "https://github.com/pal1000/mesa-dist-win/releases/download/$mesaVersion/mesa3d-$mesaVersion-release-msvc.7z"
+          7z x mesa.7z -omesa | Out-Null
+          curl.exe -fsSL --retry 3 -o vulkan.zip "https://sdk.lunarg.com/sdk/download/$vulkanVersion/windows/vulkan-runtime-components.zip"
+          Expand-Archive vulkan.zip vulkan
+          $tests64 = "build/_deps/universal_imgui_hook-build/tests/Release"
+          $tests32 = "build-x86/_deps/universal_imgui_hook-build/tests/Release"
+          Copy-Item mesa/x64/opengl32.dll, mesa/x64/libgallium_wgl.dll, mesa/x64/dxil.dll $tests64
+          Copy-Item mesa/x86/opengl32.dll, mesa/x86/libgallium_wgl.dll, mesa/x86/dxil.dll $tests32
+          $loader64 = (Get-ChildItem vulkan -Recurse -Filter vulkan-1.dll | Where-Object { $_.Directory.Name -eq "x64" } | Select-Object -First 1).FullName
+          $loader32 = (Get-ChildItem vulkan -Recurse -Filter vulkan-1.dll | Where-Object { $_.Directory.Name -eq "x86" } | Select-Object -First 1).FullName
+          if (!$loader64 -or !$loader32) { throw "Both x64 and x86 Vulkan loaders are required." }
+          Copy-Item $loader64 $tests64
+          Copy-Item $loader32 $tests32
+          $icd64 = (Get-ChildItem mesa/x64 -Filter "lvp_icd.*.json" | Select-Object -First 1).FullName
+          $icd32 = (Get-ChildItem mesa/x86 -Filter "lvp_icd.*.json" | Select-Object -First 1).FullName
+          if (!$icd64 -or !$icd32) { throw "Both x64 and x86 Lavapipe manifests are required." }
+          $registry64 = "HKLM:\SOFTWARE\Khronos\Vulkan\Drivers"
+          New-Item -Path $registry64 -Force | Out-Null
+          New-ItemProperty -Path $registry64 -Name $icd64 -Value 0 -PropertyType DWord -Force | Out-Null
+          $registry32 = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+            [Microsoft.Win32.RegistryHive]::LocalMachine,
+            [Microsoft.Win32.RegistryView]::Registry32)
+          $drivers32 = $registry32.CreateSubKey("SOFTWARE\Khronos\Vulkan\Drivers")
+          $drivers32.SetValue($icd32, 0, [Microsoft.Win32.RegistryValueKind]::DWord)
+          $drivers32.Dispose()
+          $registry32.Dispose()
+
+      - name: Test Vulkan and OpenGL backends
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $hostExe = "build/_deps/universal_imgui_hook-build/tests/Release/uih_host.exe"
+          $env:GALLIUM_DRIVER = "llvmpipe"
+          foreach ($api in @("opengl", "vulkan")) {
+            Write-Host "Testing $api backend with Mesa software rendering"
+            & $hostExe --api $api --capture
+            if ($LASTEXITCODE -ne 0) { throw "$api backend test failed with exit code $LASTEXITCODE" }
+          }
+
+      - name: Test Win32 graphics backends
+        shell: pwsh
+        env:
+          GALLIUM_DRIVER: llvmpipe
+        run: |
+          $ErrorActionPreference = "Stop"
+          $hostExe = "build-x86/_deps/universal_imgui_hook-build/tests/Release/uih_host.exe"
+          & $hostExe --api d3d9 --capture
+          if ($LASTEXITCODE -ne 0) { throw "Win32 D3D9 backend test failed." }
+          foreach ($api in @("d3d10", "d3d11", "d3d12")) {
+            & $hostExe --api $api --warp --capture
+            if ($LASTEXITCODE -ne 0) { throw "Win32 $api backend test failed." }
+          }
+          foreach ($api in @("opengl", "vulkan")) {
+            & $hostExe --api $api --capture
+            if ($LASTEXITCODE -ne 0) { throw "Win32 $api backend test failed." }
+          }
+
+      - name: Run graphics lifecycle and renderer regression suite
+        shell: bash
+        env:
+          GALLIUM_DRIVER: llvmpipe
+          UIH_TEST_FULLSCREEN: 1
+        run: |
+          set -o pipefail
+          ctest --test-dir build/_deps/universal_imgui_hook-build -C Release --output-on-failure --timeout 120 | tee ctest.log
+          # DirectInput cannot observe synthetic key presses on hosted runners.
+          grep -q "tests passed" ctest.log || { echo "CTest did not execute any tests."; exit 1; }
+          if grep Skipped ctest.log | grep -v input_directinput; then exit 1; fi
+
+      # Exercise OpenGL through Mesa's D3D12-based driver as well as llvmpipe.
+      - name: Test OpenGL on Mesa's D3D12 driver
+        shell: bash
+        env:
+          GALLIUM_DRIVER: d3d12
+        run: |
+          set -o pipefail
+          ctest --test-dir build/_deps/universal_imgui_hook-build -C Release --output-on-failure --timeout 120 -R opengl | tee ctest-d3d12.log
+          grep -q "tests passed" ctest-d3d12.log || { echo "OpenGL D3D12 CTest did not execute."; exit 1; }
+          if grep Skipped ctest-d3d12.log; then exit 1; fi
+
+      - name: Install Direct3D debug layers
+        shell: pwsh
+        run: Add-WindowsCapability -Online -Name "Tools.Graphics.DirectX~~~~0.0.1.0"
+
+      - name: Test Direct3D 10 through 12 with debug layers
+        shell: bash
+        env:
+          UIH_TEST_D3D_DEBUG: 1
+        run: |
+          ctest --test-dir build/_deps/universal_imgui_hook-build -C Release -V -R "d3d1[012]" -E fullscreen --timeout 120 > ctest-debug.log 2>&1
+          grep -E "Test +#|DEBUG LAYER ERROR|tests passed" ctest-debug.log
+          grep -q "tests passed" ctest-debug.log || { echo "Direct3D debug-layer CTest did not execute."; exit 1; }
+          if grep -qE "Skipped|Failed|DEBUG LAYER ERROR" ctest-debug.log; then exit 1; fi
+
+      - name: Install Vulkan validation layer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $vulkanVersion = "1.4.363.0"
+          curl.exe -fsSL --retry 3 -o vulkansdk.exe "https://sdk.lunarg.com/sdk/download/$vulkanVersion/windows/vulkansdk-windows-X64-$vulkanVersion.exe"
+          $installer = Start-Process -Wait -PassThru -NoNewWindow -FilePath .\vulkansdk.exe -ArgumentList "--root", "C:\VulkanSDK", "--accept-licenses", "--default-answer", "--confirm-command", "install"
+          if ($installer.ExitCode -ne 0) { throw "Vulkan SDK installer exit code $($installer.ExitCode)" }
+          $manifest = Get-ChildItem -Path "C:\VulkanSDK" -Recurse -Filter "VkLayer_khronos_validation.json" |
+            Select-Object -First 1
+          if (!$manifest) { throw "Khronos Vulkan validation layer manifest was not installed." }
+          $key = "HKLM:\SOFTWARE\Khronos\Vulkan\ExplicitLayers"
+          New-Item -Path $key -Force | Out-Null
+          New-ItemProperty -Path $key -Name $manifest.FullName -Value 0 -PropertyType DWord -Force | Out-Null
+
+      - name: Test Vulkan with validation layer
+        shell: bash
+        env:
+          UIH_TEST_VULKAN_VALIDATION: 1
+        run: |
+          ctest --test-dir build/_deps/universal_imgui_hook-build -C Release -V -R vulkan --timeout 120 > ctest-validation.log 2>&1
+          grep -E "Test +#|VALIDATION ERROR|tests passed" ctest-validation.log
+          grep -q "tests passed" ctest-validation.log || { echo "Vulkan validation CTest did not execute."; exit 1; }
+          if grep -qE "Skipped|Failed|VALIDATION ERROR" ctest-validation.log; then exit 1; fi
 
       - name: Package release
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $exe = "build/Release/ReplayHUD.exe"
-          if (!(Test-Path $exe)) { throw "Expected executable not found: $exe" }
-          New-Item -ItemType Directory -Force -Path release | Out-Null
+          $hook64 = "build/Release/ReplayHUDHook.dll"
+          $d3d8x64 = "build/d3d8-proxy/Release/d3d8.dll"
+          $hook32 = "build-x86/Release/ReplayHUDHook.dll"
+          $d3d8x86 = "build-x86/d3d8-proxy/Release/d3d8.dll"
+          $injector32 = "build-x86/Release/ReplayHUDInjector32.exe"
+          foreach ($file in @($exe, $hook64, $d3d8x64, $hook32, $d3d8x86, $injector32)) {
+            if (!(Test-Path $file)) { throw "Expected release file not found: $file" }
+          }
+          New-Item -ItemType Directory -Force -Path release/x86 | Out-Null
           Copy-Item $exe "release/ReplayHUD.exe"
+          Copy-Item $hook64 "release/ReplayHUDHook.dll"
+          Copy-Item $d3d8x64 "release/d3d8.dll"
+          Copy-Item $injector32 "release/ReplayHUDInjector32.exe"
+          Copy-Item $hook32 "release/x86/ReplayHUDHook.dll"
+          Copy-Item $d3d8x86 "release/x86/d3d8.dll"
           Copy-Item README.md "release/README.md"
           Copy-Item LICENSE.txt "release/LICENSE.txt"
-          Compress-Archive -Path "release/ReplayHUD.exe", "release/README.md", "release/LICENSE.txt" `
-            -DestinationPath "ReplayHUD-Windows-x64.zip" -Force
+          Copy-Item "build/_deps/universal_imgui_hook-src/LICENSE" "release/LICENSE-Universal-Dear-ImGui-Hook.txt"
+          Copy-Item "build/_deps/d3d8to9-src/LICENSE.md" "release/LICENSE-d3d8to9.txt"
+          Compress-Archive -Path "release/*" -DestinationPath "ReplayHUD-Windows.zip" -Force
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ReplayHUD-Windows-x64
+          name: ReplayHUD-Windows
           path: |
             release/ReplayHUD.exe
-            ReplayHUD-Windows-x64.zip
+            release/ReplayHUDHook.dll
+            release/d3d8.dll
+            release/ReplayHUDInjector32.exe
+            release/x86/**
+            ReplayHUD-Windows.zip
           if-no-files-found: error
 
+      - name: Remove temporary branches after successful main build
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($branch in @("fix/d3d11-present-hook", "fix/foreground-fullscreen-hook")) {
+            gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/git/refs/heads/$branch"
+            if ($LASTEXITCODE -ne 0) { throw "Could not delete temporary branch: $branch" }
+          }
+
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          name: ReplayHUD ${{ github.ref_name }}
+          name: ReplayHUD ${{ github.ref == 'refs/heads/main' && 'v1.3.0' || github.ref_name }}
+          tag_name: ${{ github.ref == 'refs/heads/main' && 'v1.3.0' || github.ref_name }}
+          target_commitish: main
           generate_release_notes: true
           files: |
             release/ReplayHUD.exe
-            ReplayHUD-Windows-x64.zip
+            ReplayHUD-Windows.zip

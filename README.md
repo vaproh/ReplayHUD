@@ -15,17 +15,17 @@ ReplayHUD is a lightweight native Windows notification app for OBS Studio's Repl
 - **Native Windows app:** C++17 and Win32 APIs; no Electron, browser runtime, or .NET runtime.
 - **Embedded icon:** the ReplayHUD icon is compiled into the executable and used for the app, tray, and notification.
 - **Automatic reconnect:** changing the OBS connection settings requests a clean WebSocket shutdown and reconnect.
-- **Experimental game hook companion:** publishes replay text to `ReplayHUDHook.dll`, which can render over D3D11 games when injection succeeds.
+- **Experimental multi-API game overlay:** a companion DLL uses a shared Dear ImGui notification renderer with dedicated Direct3D 9/10/11/12, Vulkan, and OpenGL backends.
 
 ## Requirements
 
-- Windows 10 version 1703 or newer, 64-bit.
+- Windows 10 version 1703 or newer, 64-bit host OS. The package includes x64 and x86 game hooks.
 - OBS Studio with the built-in WebSocket server (OBS Studio 28 or newer is recommended).
 - OBS Replay Buffer enabled and started.
 
 ## Download
 
-Download `ReplayHUD-Windows-x64.zip` or `ReplayHUD.exe` from the repository's [Releases](../../releases) page. Extract the ZIP and run `ReplayHUD.exe`.
+Download `ReplayHUD-Windows.zip` from the repository's [Releases](../../releases) page. Extract the ZIP and run `ReplayHUD.exe`. The x86 helper and both architecture-specific D3D8 proxies are included.
 
 On first launch, ReplayHUD starts in the system tray. Click the tray icon with the right mouse button and choose **Settings...**.
 
@@ -86,7 +86,7 @@ ReplayHUD does not record video, modify OBS scenes, or change Replay Buffer file
 ### Requirements
 
 - Visual Studio 2022 or Visual Studio 2022 Build Tools with **Desktop development with C++**.
-- CMake 3.20 or newer.
+- CMake 3.21 or newer.
 - Windows 10/11 SDK.
 
 ### Build
@@ -102,6 +102,10 @@ The executable and hook companion DLL are created at:
 ```text
 build\Release\ReplayHUD.exe
 build\Release\ReplayHUDHook.dll
+build\d3d8-proxy\Release\d3d8.dll
+build-x86\Release\ReplayHUDInjector32.exe
+build-x86\Release\ReplayHUDHook.dll
+build-x86\d3d8-proxy\Release\d3d8.dll
 ```
 
 You can also build directly with CMake:
@@ -109,42 +113,61 @@ You can also build directly with CMake:
 ```bat
 cmake -S . -B build -A x64
 cmake --build build --config Release --parallel
+cmake -S . -B build-x86 -A Win32 -DREPLAYHUD_BUILD_BACKEND_TESTS=OFF
+cmake --build build-x86 --config Release --target ReplayHUDHook d3d8to9 ReplayHUDInjector32 --parallel
 ```
 
-The build uses the static MSVC runtime (`/MT`). The application icon and Windows file-version metadata are embedded from `assets/ReplayHUD.ico` and `ReplayHUD.rc.in`.
+The build uses the static MSVC runtime (`/MT`). CMake fetches pinned revisions of Universal Dear ImGui Hook and d3d8to9. The former provides the D3D9/10/11/12, Vulkan and OpenGL renderers; the latter translates D3D8 to D3D9. The x86 build supplies a 32-bit hook and helper injector for legacy 32-bit games. The application icon and Windows file-version metadata are embedded from `assets/ReplayHUD.ico` and `ReplayHUD.rc.in`.
 
 ## Automated GitHub Releases
 
-The workflow at `.github/workflows/release.yml` builds a Windows x64 executable whenever a tag matching `v*` is pushed.
+The workflow at `.github/workflows/release.yml` builds and tests every pull request and branch update. After a successful build on `main`, it removes the temporary development branches, creates the `v1.3.0` tag, and publishes the GitHub Release.
 
 ```bash
 git add .
 git commit -m "Prepare release"
 git push origin main
-
-git tag -a v1.1.0 -m "ReplayHUD v1.1.0"
-git push origin v1.1.0
 ```
 
-For a tagged build, GitHub Actions:
+After the main-branch build passes, GitHub Actions:
 
-1. Configures and compiles the x64 Release executable on a Windows runner.
-2. Packages `ReplayHUD.exe`, `README.md`, and `LICENSE.txt` into `ReplayHUD-Windows-x64.zip`.
-3. Publishes the executable and ZIP to a GitHub Release.
-4. Generates release notes automatically from repository changes.
+1. Builds the x64 application and hook, plus x86 hook, helper injector, and D3D8 proxy.
+2. Runs x64 and x86 smoke tests: D3D9 on the hosted device, WARP for D3D10/11/12, and Mesa software drivers for Vulkan/OpenGL; the x64 build also runs the graphics lifecycle regression suite.
+3. Packages both architectures, the D3D8 compatibility proxy, and required third-party license notices into `ReplayHUD-Windows.zip`.
+4. Publishes the ZIP to a GitHub Release and generates release notes.
 
 A manual run from the Actions tab builds and uploads workflow artifacts but does not publish a GitHub Release. The workflow requests `contents: write`; repository Actions policy must allow release publishing.
 
-## Display limitations
+## In-game overlay API support
 
-ReplayHUD still shows its normal topmost desktop toast window. It now also publishes the active toast to an experimental D3D11 hook companion (`ReplayHUDHook.dll`) and attempts foreground-process injection when a replay is saved.
+The in-game overlay uses a pinned revision of the MIT-licensed [Universal Dear ImGui Hook](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook) as its graphics interception and rendering layer. ReplayHUD supplies the notification UI and shared-memory bridge; the backend library handles API detection, present hooks, device lifecycle, and graphics-state management.
+
+This ReplayHUD application is Windows-only. It does not yet include a native Linux companion for Linux games or Proton/Wine sessions.
+
+| Graphics API | Status in this build |
+|---|---|
+| Direct3D 8 | Supported through the bundled d3d8to9 proxy, which translates D3D8 to D3D9. Requires per-game proxy installation. |
+| Direct3D 9 | Backend integrated; requires in-game validation |
+| Direct3D 10 | Backend integrated; requires in-game validation |
+| Direct3D 11 | Backend integrated; requires in-game validation |
+| Direct3D 12 | Backend integrated; requires in-game validation |
+| Vulkan | Backend integrated; requires in-game validation |
+| OpenGL 3.0+ (WGL) | Backend integrated; requires in-game validation |
+
+The backend library's automated host tests cover API-specific rendering, swap-chain/device recreation, resize handling, and several failure scenarios. ReplayHUD's own notification-to-renderer integration still needs end-to-end validation with OBS notifications in real games.
 
 Important limits:
 
-- Hook rendering currently targets **D3D11 Present** only.
-- Exclusive-fullscreen and borderless-fullscreen visibility depends on successful injection and game/anti-cheat policy.
-- Anti-cheat protected titles may block or terminate external overlay injections.
-- If injection fails, ReplayHUD continues using the regular desktop toast behavior.
+- The main ReplayHUD app is x64. It launches the bundled x86 helper to inject the x86 hook into 32-bit game processes.
+- For D3D8 games, copy the architecture-matching `d3d8.dll` and `ReplayHUDHook.dll` from the package into the game's executable directory. Use the package root files for 64-bit games and the `x86` folder for 32-bit games. The proxy loads the hook from the same directory and translates D3D8 rendering to D3D9.
+- The D3D8 proxy is an API translation layer, not native D3D8 rendering. Some old titles behave differently under translation; d3d8to9 may also need the legacy DirectX End-User Runtime for D3DX shader helpers. Remove the local `d3d8.dll` to revert to the system D3D8 runtime.
+- HDR output, unusual swap-chain formats, overlays from other tools, and games with multiple render windows may still expose compatibility issues.
+- Exclusive-fullscreen visibility depends on the display mode, driver, and application. Borderless-fullscreen is the first configuration to validate.
+- ReplayHUD only attempts injection when the foreground process has a supported graphics runtime loaded. Common desktop apps/launchers and several known anti-cheat modules are excluded. This is a best-effort safety filter, not a complete anti-cheat detector.
+- Protected games and anti-cheat systems may still block third-party overlays. ReplayHUD does not attempt to bypass those protections; use only titles where overlays are permitted.
+- The desktop toast is suppressed only after the in-game renderer has drawn the notification. If no compatible renderer becomes ready, the desktop toast remains the fallback.
+- Hook diagnostics are written to `%LOCALAPPDATA%\\ReplayHUD\\ReplayHUDHook.log` in the target process.
+- If injection or hook initialization fails, ReplayHUD continues using the regular desktop toast behavior.
 
 ## Troubleshooting
 

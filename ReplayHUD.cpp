@@ -5,6 +5,7 @@
 #define _WIN32_WINNT 0x0A00
 
 #include <windows.h>
+#include <tlhelp32.h>
 #include <windowsx.h>
 #include <winhttp.h>
 #include <bcrypt.h>
@@ -132,42 +133,82 @@ ConnectionStatus g_status = ConnectionStatus::Connecting;
 HFONT g_uiFont = nullptr;
 HFONT g_uiBoldFont = nullptr;
 HANDLE g_overlayMapping = nullptr;
+HANDLE g_overlayMutex = nullptr;
 replayhud::OverlayPayload* g_overlayPayload = nullptr;
-std::mutex g_injectedProcessesMutex;
-std::map<DWORD, bool> g_injectedProcesses;
 
-void PublishOverlayPayload(const std::wstring& title, const std::wstring& subtitle, UINT durationMs) {
-    if (!g_overlayPayload) return;
-    replayhud::OverlayPayload payload{};
-    payload.version = replayhud::kOverlayPayloadVersion;
-    payload.active = 1;
-    payload.expiresAtTick = GetTickCount64() + durationMs;
-    wcsncpy_s(payload.title, title.c_str(), _TRUNCATE);
-    wcsncpy_s(payload.subtitle, subtitle.c_str(), _TRUNCATE);
-    *g_overlayPayload = payload;
+void Log(const std::wstring& message);
+
+void PublishOverlayPayload(const std::wstring& title, const std::wstring& subtitle, UINT durationMs, int position, int marginPx) {
+    if (!g_overlayPayload || !g_overlayMutex) return;
+    const DWORD wait = WaitForSingleObject(g_overlayMutex, 100);
+    if (wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED) {
+        g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
+        g_overlayPayload->active = 1;
+        g_overlayPayload->expiresAtTick = GetTickCount64() + durationMs;
+        g_overlayPayload->position = std::clamp(position, 0, 3);
+        g_overlayPayload->marginPx = std::clamp(marginPx, 8, 200);
+        wcsncpy_s(g_overlayPayload->title, title.c_str(), _TRUNCATE);
+        wcsncpy_s(g_overlayPayload->subtitle, subtitle.c_str(), _TRUNCATE);
+        ReleaseMutex(g_overlayMutex);
+    }
 }
 
 void ClearOverlayPayload() {
-    if (!g_overlayPayload) return;
-    g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
-    g_overlayPayload->active = 0;
-    g_overlayPayload->expiresAtTick = 0;
-    g_overlayPayload->title[0] = L'\0';
-    g_overlayPayload->subtitle[0] = L'\0';
+    if (!g_overlayPayload || !g_overlayMutex) return;
+    const DWORD wait = WaitForSingleObject(g_overlayMutex, 100);
+    if (wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED) {
+        g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
+        g_overlayPayload->active = 0;
+        g_overlayPayload->expiresAtTick = 0;
+        g_overlayPayload->position = 0;
+        g_overlayPayload->marginPx = 24;
+        g_overlayPayload->title[0] = L'\0';
+        g_overlayPayload->subtitle[0] = L'\0';
+        ReleaseMutex(g_overlayMutex);
+    }
 }
 
 bool InitializeOverlayBridge() {
+    g_overlayMutex = CreateMutexW(nullptr, FALSE, replayhud::kOverlayMutexName);
+    if (!g_overlayMutex) return false;
+
     g_overlayMapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
         static_cast<DWORD>(sizeof(replayhud::OverlayPayload)), replayhud::kOverlayMappingName);
-    if (!g_overlayMapping) return false;
+    if (!g_overlayMapping) {
+        CloseHandle(g_overlayMutex);
+        g_overlayMutex = nullptr;
+        return false;
+    }
+
     g_overlayPayload = static_cast<replayhud::OverlayPayload*>(
         MapViewOfFile(g_overlayMapping, FILE_MAP_WRITE, 0, 0, sizeof(replayhud::OverlayPayload)));
     if (!g_overlayPayload) {
         CloseHandle(g_overlayMapping);
         g_overlayMapping = nullptr;
+        CloseHandle(g_overlayMutex);
+        g_overlayMutex = nullptr;
         return false;
     }
-    ClearOverlayPayload();
+
+    const DWORD wait = WaitForSingleObject(g_overlayMutex, 100);
+    if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
+        UnmapViewOfFile(g_overlayPayload);
+        g_overlayPayload = nullptr;
+        CloseHandle(g_overlayMapping);
+        g_overlayMapping = nullptr;
+        CloseHandle(g_overlayMutex);
+        g_overlayMutex = nullptr;
+        return false;
+    }
+
+    g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
+    g_overlayPayload->active = 0;
+    g_overlayPayload->expiresAtTick = 0;
+    g_overlayPayload->position = 0;
+    g_overlayPayload->marginPx = 24;
+    g_overlayPayload->title[0] = L'\0';
+    g_overlayPayload->subtitle[0] = L'\0';
+    ReleaseMutex(g_overlayMutex);
     return true;
 }
 
@@ -180,6 +221,10 @@ void ShutdownOverlayBridge() {
     if (g_overlayMapping) {
         CloseHandle(g_overlayMapping);
         g_overlayMapping = nullptr;
+    }
+    if (g_overlayMutex) {
+        CloseHandle(g_overlayMutex);
+        g_overlayMutex = nullptr;
     }
 }
 
@@ -199,14 +244,60 @@ bool InjectHookIntoProcess(DWORD processId, const std::wstring& hookDllPath) {
         PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, FALSE, processId);
     if (!process) return false;
 
+    BOOL targetIsWow64 = FALSE;
+    if (!IsWow64Process(process, &targetIsWow64)) {
+        CloseHandle(process);
+        return false;
+    }
+
+    if (targetIsWow64) {
+        // A 64-bit process cannot safely use its LoadLibraryW address in a
+        // WOW64 target. Delegate the injection to the packaged 32-bit helper.
+        CloseHandle(process);
+
+        const size_t separator = hookDllPath.find_last_of(L"\\/");
+        if (separator == std::wstring::npos) return false;
+        const std::wstring appDirectory = hookDllPath.substr(0, separator + 1);
+        const std::wstring helperPath = appDirectory + L"ReplayHUDInjector32.exe";
+        const std::wstring x86HookPath = appDirectory + L"x86\\ReplayHUDHook.dll";
+        if (GetFileAttributesW(helperPath.c_str()) == INVALID_FILE_ATTRIBUTES ||
+            GetFileAttributesW(x86HookPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            Log(L"32-bit target detected, but ReplayHUDInjector32.exe or x86\\ReplayHUDHook.dll is missing.");
+            return false;
+        }
+
+        std::wstring command = L"\"" + helperPath + L"\" --pid " +
+            std::to_wstring(processId) + L" --dll \"" + x86HookPath + L"\"";
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION child{};
+        if (!CreateProcessW(helperPath.c_str(), command.data(), nullptr, nullptr, FALSE,
+                CREATE_NO_WINDOW, nullptr, appDirectory.c_str(), &startup, &child)) {
+            Log(L"Failed to start the 32-bit ReplayHUD injection helper.");
+            return false;
+        }
+
+        const DWORD wait = WaitForSingleObject(child.hProcess, 30000);
+        DWORD exitCode = 1;
+        const bool completed = wait == WAIT_OBJECT_0 &&
+            GetExitCodeProcess(child.hProcess, &exitCode) != FALSE;
+        CloseHandle(child.hThread);
+        CloseHandle(child.hProcess);
+        if (!completed) Log(L"32-bit ReplayHUD injection helper timed out or could not report its result.");
+        return completed && exitCode == 0;
+    }
+
     const size_t bytes = (hookDllPath.size() + 1) * sizeof(wchar_t);
-    LPVOID remotePath = VirtualAllocEx(process, nullptr, bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    LPVOID remotePath = VirtualAllocEx(process, nullptr, bytes,
+        MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     if (!remotePath) {
         CloseHandle(process);
         return false;
     }
-    BOOL wrote = WriteProcessMemory(process, remotePath, hookDllPath.c_str(), bytes, nullptr);
-    if (!wrote) {
+
+    SIZE_T written = 0;
+    if (!WriteProcessMemory(process, remotePath, hookDllPath.c_str(), bytes, &written) ||
+        written != bytes) {
         VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
         CloseHandle(process);
         return false;
@@ -228,36 +319,115 @@ bool InjectHookIntoProcess(DWORD processId, const std::wstring& hookDllPath) {
         return false;
     }
 
-    WaitForSingleObject(remoteThread, 1500);
+    // Keep the remote string alive until LoadLibraryW has definitely returned.
+    const DWORD waitResult = WaitForSingleObject(remoteThread, INFINITE);
     DWORD remoteResult = 0;
-    GetExitCodeThread(remoteThread, &remoteResult);
+    const bool completed = waitResult == WAIT_OBJECT_0 &&
+        GetExitCodeThread(remoteThread, &remoteResult) != FALSE;
     CloseHandle(remoteThread);
     VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
     CloseHandle(process);
-    return remoteResult != 0;
+    return completed && remoteResult != 0;
 }
 
-void EnsureForegroundHookInjected() {
-    std::wstring hookDllPath = GetHookDllPath();
-    if (hookDllPath.empty()) return;
-    if (GetFileAttributesW(hookDllPath.c_str()) == INVALID_FILE_ATTRIBUTES) return;
+bool InspectOverlayTargetModules(DWORD processId, bool& hookLoaded) {
+    hookLoaded = false;
+
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+    if (!process) return false;
+    wchar_t imagePath[32768]{};
+    DWORD imagePathLength = static_cast<DWORD>(std::size(imagePath));
+    const BOOL gotImagePath = QueryFullProcessImageNameW(process, 0, imagePath, &imagePathLength);
+    CloseHandle(process);
+    if (!gotImagePath || imagePathLength == 0) return false;
+
+    std::wstring imageName(imagePath, imagePathLength);
+    const size_t imageSeparator = imageName.find_last_of(L"\\/");
+    if (imageSeparator != std::wstring::npos) imageName.erase(0, imageSeparator + 1);
+    static constexpr const wchar_t* excludedProcesses[] = {
+        L"ReplayHUD.exe", L"obs64.exe", L"obs32.exe", L"steam.exe",
+        L"steamwebhelper.exe", L"explorer.exe", L"chrome.exe",
+        L"msedge.exe", L"msedgewebview2.exe", L"firefox.exe",
+        L"brave.exe", L"opera.exe", L"discord.exe", L"telegram.exe",
+        L"vlc.exe", L"mpv.exe", L"spotify.exe", L"taskmgr.exe"
+    };
+    for (const wchar_t* name : excludedProcesses) {
+        if (_wcsicmp(imageName.c_str(), name) == 0) return false;
+    }
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, processId);
+    if (snapshot == INVALID_HANDLE_VALUE) return false;
+
+    static constexpr const wchar_t* graphicsModules[] = {
+        L"d3d8.dll", L"d3d9.dll", L"d3d10.dll", L"d3d10_1.dll",
+        L"d3d11.dll", L"d3d12.dll", L"vulkan-1.dll", L"opengl32.dll"
+    };
+    static constexpr const wchar_t* protectedModules[] = {
+        L"EasyAntiCheat_EOS.dll", L"EasyAntiCheat_x64.dll", L"EasyAntiCheat.dll",
+        L"BEClient_x64.dll", L"BEService.dll", L"BattlEye.dll",
+        L"FACEIT.dll", L"FACEITClient.dll"
+    };
+
+    bool graphicsRuntimeLoaded = false;
+    bool protectedRuntimeLoaded = false;
+    MODULEENTRY32W module{};
+    module.dwSize = sizeof(module);
+    if (Module32FirstW(snapshot, &module)) {
+        do {
+            if (_wcsicmp(module.szModule, L"ReplayHUDHook.dll") == 0)
+                hookLoaded = true;
+            for (const wchar_t* name : graphicsModules) {
+                if (_wcsicmp(module.szModule, name) == 0) {
+                    graphicsRuntimeLoaded = true;
+                    break;
+                }
+            }
+            for (const wchar_t* name : protectedModules) {
+                if (_wcsicmp(module.szModule, name) == 0) {
+                    protectedRuntimeLoaded = true;
+                    break;
+                }
+            }
+        } while (Module32NextW(snapshot, &module));
+    }
+    CloseHandle(snapshot);
+    return graphicsRuntimeLoaded && !protectedRuntimeLoaded;
+}
+
+bool EnsureForegroundHookInjected(HANDLE readyEvent) {
+    if (!readyEvent) return false;
+
+    const std::wstring hookDllPath = GetHookDllPath();
+    if (hookDllPath.empty() || GetFileAttributesW(hookDllPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        return false;
+    }
 
     HWND foreground = GetForegroundWindow();
-    if (!foreground) return;
+    if (!foreground) {
+        return false;
+    }
 
     DWORD processId = 0;
     GetWindowThreadProcessId(foreground, &processId);
-    if (!processId || processId == GetCurrentProcessId()) return;
-
-    {
-        std::lock_guard<std::mutex> lock(g_injectedProcessesMutex);
-        if (g_injectedProcesses.count(processId) != 0) return;
+    if (!processId || processId == GetCurrentProcessId()) {
+        CloseHandle(readyEvent);
+        return false;
     }
 
-    if (InjectHookIntoProcess(processId, hookDllPath)) {
-        std::lock_guard<std::mutex> lock(g_injectedProcessesMutex);
-        g_injectedProcesses[processId] = true;
+    bool hookAlreadyLoaded = false;
+    if (!InspectOverlayTargetModules(processId, hookAlreadyLoaded)) {
+        CloseHandle(readyEvent);
+        return false;
     }
+
+    if (!hookAlreadyLoaded && !InjectHookIntoProcess(processId, hookDllPath)) {
+        CloseHandle(readyEvent);
+        return false;
+    }
+
+    // Only suppress the desktop toast once the injected renderer has actually
+    // drawn this notification. If no backend presents, keep the desktop fallback.
+    const DWORD wait = WaitForSingleObject(readyEvent, 1000);
+    return wait == WAIT_OBJECT_0;
 }
 
 int DpiScale(HWND hwnd, int value) {
@@ -1176,8 +1346,20 @@ void ShowNotification(const std::wstring& path, bool test,
             MessageBeep(MB_ICONASTERISK);
     }
 
-    PublishOverlayPayload(g_toastTitle, g_toastSubtitle, settings.durationMs);
-    EnsureForegroundHookInjected();
+    HANDLE readyEvent = CreateEventW(nullptr, TRUE, FALSE, replayhud::kOverlayReadyEventName);
+    if (readyEvent) ResetEvent(readyEvent);
+    PublishOverlayPayload(g_toastTitle, g_toastSubtitle, settings.durationMs, settings.position, settings.marginPx);
+    const bool gameOverlayReady = EnsureForegroundHookInjected(readyEvent);
+    if (readyEvent) CloseHandle(readyEvent);
+    if (gameOverlayReady) {
+        KillTimer(g_overlayWindow, kToastTimer);
+        KillTimer(g_overlayWindow, kAnimationTimer);
+        ShowWindow(g_overlayWindow, SW_HIDE);
+        return;
+    }
+    // No compatible renderer became ready. Clear the shared payload so a late
+    // hook startup cannot duplicate the desktop fallback toast.
+    ClearOverlayPayload();
 
     POINT cursor{};
     GetCursorPos(&cursor);
