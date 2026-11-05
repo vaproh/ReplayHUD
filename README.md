@@ -128,8 +128,8 @@ git add .
 git commit -m "Prepare release"
 git push origin main
 
-git tag -a v1.1.0 -m "ReplayHUD v1.1.0"
-git push origin v1.1.0
+git tag -a v1.3.0 -m "ReplayHUD v1.3.0"
+git push origin v1.3.0
 ```
 
 For a tagged build, GitHub Actions:
