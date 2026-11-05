@@ -66,7 +66,7 @@ jobs:
               if data[:2] != b"MZ":
                   raise SystemExit(f"{path}: missing DOS header")
               pe = struct.unpack_from("<I", data, 0x3c)[0]
-              if data[pe:pe+4] != b"PE\\0\\0":
+              if data[pe:pe+4] != b"PE\x00\x00":
                   raise SystemExit(f"{path}: missing PE signature")
               machine, sections, _, _, _, optional_size = struct.unpack_from("<HHIIIH", data, pe + 4)
               optional = pe + 24
