@@ -34,12 +34,27 @@ ImFont* g_hintFont = nullptr;
 
 void SetupOverlayUi() {
     ImGuiIO& io = ImGui::GetIO();
-    g_titleFont = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeuib.ttf", 17.0f);
-    g_bodyFont = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 16.0f);
-    g_hintFont = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 12.0f);
-    if (!g_titleFont) g_titleFont = io.FontDefault;
-    if (!g_bodyFont) g_bodyFont = io.FontDefault;
-    if (!g_hintFont) g_hintFont = io.FontDefault;
+
+    // Resolve the Windows font directory instead of assuming Windows is on C:.
+    wchar_t windowsDirectory[MAX_PATH]{};
+    const UINT length = GetWindowsDirectoryW(windowsDirectory, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) return;
+
+    std::wstring fontDirectory(windowsDirectory, length);
+    fontDirectory += L"\\Fonts\\";
+    const std::wstring regularFont = fontDirectory + L"segoeui.ttf";
+    const std::wstring semiboldFont = fontDirectory + L"segoeuisb.ttf";
+    const std::wstring boldFont = fontDirectory + L"segoeuib.ttf";
+
+    ImFont* regular = io.Fonts->AddFontFromFileTTF(regularFont.c_str(), 16.0f);
+    ImFont* semibold = io.Fonts->AddFontFromFileTTF(semiboldFont.c_str(), 17.0f);
+    ImFont* bold = io.Fonts->AddFontFromFileTTF(boldFont.c_str(), 14.0f);
+    ImFont* hint = io.Fonts->AddFontFromFileTTF(regularFont.c_str(), 11.0f);
+
+    g_titleFont = bold ? bold : (semibold ? semibold : io.FontDefault);
+    g_bodyFont = semibold ? semibold : (regular ? regular : io.FontDefault);
+    g_hintFont = hint ? hint : io.FontDefault;
+    if (regular) io.FontDefault = regular;
 }
 
 void LogHook(const wchar_t* message) {
@@ -177,9 +192,10 @@ void DrawOverlay() {
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     if (!draw || display.x <= 0.0f || display.y <= 0.0f) return;
 
-    // A compact, high-contrast toast designed to read cleanly over busy gameplay.
-    constexpr float panelWidth = 390.0f;
-    constexpr float panelHeight = 104.0f;
+    // Mirror the desktop GDI toast: same dimensions, accent, icon tile,
+    // Segoe UI hierarchy, spacing and muted footer.
+    constexpr float panelWidth = 440.0f;
+    constexpr float panelHeight = 112.0f;
     const float margin = static_cast<float>((std::clamp)(payload.marginPx, 8L, 200L));
     const float width = (std::min)(panelWidth, (std::max)(1.0f, display.x - margin * 2.0f));
     const float height = (std::min)(panelHeight, (std::max)(1.0f, display.y - margin * 2.0f));
@@ -191,60 +207,53 @@ void DrawOverlay() {
     const ImVec2 min(left, top);
     const ImVec2 max(left + width, top + height);
 
-    const bool isStopped = title.find("STOP") != std::string::npos;
-    const bool isBufferEvent = title.find("REPLAY BUFFER") != std::string::npos;
-    const ImU32 accent = isStopped ? IM_COL32(245, 166, 35, 255) : IM_COL32(132, 204, 22, 255);
-    const ImU32 muted = IM_COL32(151, 163, 180, 255);
+    const ImU32 border = IM_COL32(54, 61, 72, 255);
+    const ImU32 background = IM_COL32(20, 23, 29, 250);
+    const ImU32 panel = IM_COL32(29, 33, 41, 255);
+    const ImU32 green = IM_COL32(118, 185, 0, 255);
+    const ImU32 text = IM_COL32(240, 243, 247, 255);
+    const ImU32 muted = IM_COL32(157, 166, 180, 255);
 
-    // Soft shadow, dark glass-like panel, subtle outline and top highlight.
-    for (int i = 5; i >= 1; --i) {
-        const float offset = static_cast<float>(i) * 1.4f;
-        draw->AddRectFilled(ImVec2(min.x, min.y + offset),
-            ImVec2(max.x, max.y + offset), IM_COL32(0, 0, 0, 12 + (5 - i) * 5),
-            13.0f, ImDrawFlags_RoundCornersAll);
-    }
-    draw->AddRectFilled(min, max, IM_COL32(68, 78, 92, 245), 13.0f,
-        ImDrawFlags_RoundCornersAll);
+    draw->AddRectFilled(min, max, border, 11.0f, ImDrawFlags_RoundCornersAll);
     draw->AddRectFilled(ImVec2(left + 1.0f, top + 1.0f),
         ImVec2(left + width - 1.0f, top + height - 1.0f),
-        IM_COL32(17, 21, 29, 248), 12.0f, ImDrawFlags_RoundCornersAll);
-    draw->AddRectFilled(ImVec2(left + 1.0f, top + 1.0f),
-        ImVec2(left + width - 1.0f, top + 3.0f), accent, 1.0f);
+        background, 10.0f, ImDrawFlags_RoundCornersAll);
+    draw->AddRectFilled(ImVec2(left, top + 16.0f),
+        ImVec2(left + 4.0f, top + height - 16.0f), green, 1.0f);
 
-    // Icon tile with a simple geometric replay glyph, no icon-font dependency.
-    const ImVec2 iconMin(left + 17.0f, top + 23.0f);
-    const ImVec2 iconMax(left + 61.0f, top + 67.0f);
-    draw->AddRectFilled(iconMin, iconMax, IM_COL32(39, 48, 58, 255), 11.0f,
-        ImDrawFlags_RoundCornersAll);
-    const ImVec2 center((iconMin.x + iconMax.x) * 0.5f, (iconMin.y + iconMax.y) * 0.5f);
-    if (isBufferEvent) {
-        if (isStopped) {
-            draw->AddRectFilled(ImVec2(center.x - 7.0f, center.y - 7.0f),
-                ImVec2(center.x - 1.0f, center.y + 7.0f), accent, 1.5f);
-            draw->AddRectFilled(ImVec2(center.x + 2.0f, center.y - 7.0f),
-                ImVec2(center.x + 8.0f, center.y + 7.0f), accent, 1.5f);
-        } else {
-            draw->AddCircle(center, 11.0f, accent, 0, 2.5f);
-            draw->AddTriangleFilled(ImVec2(center.x - 3.0f, center.y - 6.0f),
-                ImVec2(center.x - 3.0f, center.y + 6.0f),
-                ImVec2(center.x + 7.0f, center.y), accent);
-        }
+    // Same 52 px icon tile position as the desktop notification.
+    const ImVec2 tileMin(left + 22.0f, top + 25.0f);
+    const ImVec2 tileMax(left + 74.0f, top + 77.0f);
+    draw->AddRectFilled(tileMin, tileMax, panel, 9.0f, ImDrawFlags_RoundCornersAll);
+
+    const ImVec2 center((tileMin.x + tileMax.x) * 0.5f, (tileMin.y + tileMax.y) * 0.5f);
+    const bool isStopped = title.find("STOPPED") != std::string::npos;
+    const bool isBufferEvent = title.find("REPLAY BUFFER") != std::string::npos;
+    const ImU32 glyph = isStopped ? IM_COL32(232, 170, 76, 255) : green;
+    if (isBufferEvent && isStopped) {
+        draw->AddRectFilled(ImVec2(center.x - 8.0f, center.y - 8.0f),
+            ImVec2(center.x - 2.0f, center.y + 8.0f), glyph, 1.0f);
+        draw->AddRectFilled(ImVec2(center.x + 2.0f, center.y - 8.0f),
+            ImVec2(center.x + 8.0f, center.y + 8.0f), glyph, 1.0f);
     } else {
-        draw->AddCircle(center, 11.0f, accent, 0, 2.5f);
+        draw->AddCircle(center, 12.0f, glyph, 0, 2.5f);
         draw->AddTriangleFilled(ImVec2(center.x - 3.0f, center.y - 6.0f),
             ImVec2(center.x - 3.0f, center.y + 6.0f),
-            ImVec2(center.x + 7.0f, center.y), accent);
+            ImVec2(center.x + 7.0f, center.y), glyph);
     }
 
-    const float textLeft = left + 76.0f;
-    draw->PushClipRect(ImVec2(textLeft, top + 10.0f),
-        ImVec2(left + width - 15.0f, top + height - 9.0f), true);
-    draw->AddText(g_hintFont, 11.0f, ImVec2(textLeft, top + 14.0f),
-        muted, "REPLAYHUD  /  OBS");
-    draw->AddText(g_titleFont, 18.0f, ImVec2(textLeft, top + 31.0f),
-        IM_COL32(245, 247, 250, 255), title.c_str());
-    draw->AddText(g_bodyFont, 14.0f, ImVec2(textLeft, top + 62.0f),
-        IM_COL32(190, 199, 211, 255), subtitle.c_str());
+    const float textLeft = left + 92.0f;
+    draw->PushClipRect(ImVec2(textLeft, top + 12.0f),
+        ImVec2(left + width - 18.0f, top + height - 10.0f), true);
+    draw->AddText(g_titleFont, 14.0f, ImVec2(textLeft, top + 17.0f),
+        green, title.c_str());
+    draw->AddText(g_bodyFont, 17.0f, ImVec2(textLeft, top + 41.0f),
+        text, subtitle.c_str());
+    const char* footer = isBufferEvent
+        ? "ReplayHUD  |  OBS Replay Buffer"
+        : "Click to open clip  |  ReplayHUD";
+    draw->AddText(g_hintFont, 11.0f, ImVec2(textLeft, top + 75.0f),
+        muted, footer);
     draw->PopClipRect();
 
     // The UIH render callback runs before ImGui::Render(). Wait until the
