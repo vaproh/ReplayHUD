@@ -8,6 +8,14 @@ endif()
 
 enable_language(RC)
 
+include(FetchContent)
+FetchContent_Declare(minhook
+    GIT_REPOSITORY https://github.com/TsudaKageyu/minhook.git
+    GIT_TAG v1.3.4
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(minhook)
+
 # Embed the icon using an absolute path so RC resolves it consistently in
 # out-of-source and GitHub Actions builds.
 file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/assets/ReplayHUD.ico" REPLAYHUD_ICON_FILE)
@@ -66,6 +74,7 @@ target_link_libraries(ReplayHUDHook PRIVATE
     d2d1
     dwrite
     dxgi
+    minhook
 )
 
 set_target_properties(ReplayHUDHook PROPERTIES OUTPUT_NAME "ReplayHUDHook")
