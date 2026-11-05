@@ -937,6 +937,7 @@ bool AddTrayIcon(HWND hwnd) {
 }
 
 void ShowSettingsWindow();
+void SetConnectionTooltip(ConnectionStatus status);
 void ShowNotification(const std::wstring& path, bool test);
 
 void ShowTrayMenu(HWND hwnd) {
