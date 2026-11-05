@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.21)
 
 project(ReplayHUD VERSION 1.1.0 LANGUAGES CXX)
 
@@ -9,18 +9,18 @@ endif()
 enable_language(RC)
 
 include(FetchContent)
-FetchContent_Declare(minhook
-    GIT_REPOSITORY https://github.com/TsudaKageyu/minhook.git
-    GIT_TAG v1.3.4
+
+# Universal Dear ImGui Hook supplies the tested D3D9/10/11/12, Vulkan and
+# OpenGL render backends. Keep the dependency pinned; do not follow master.
+set(UIH_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+set(UIH_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(UIH_STATIC_RUNTIME ON CACHE BOOL "" FORCE)
+FetchContent_Declare(universal_imgui_hook
+    GIT_REPOSITORY https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook.git
+    GIT_TAG v2.0.0
     GIT_SHALLOW TRUE
 )
-FetchContent_MakeAvailable(minhook)
-
-if(MSVC)
-    set_property(TARGET minhook PROPERTY
-        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-    )
-endif()
+FetchContent_MakeAvailable(universal_imgui_hook)
 
 # Embed the icon using an absolute path so RC resolves it consistently in
 # out-of-source and GitHub Actions builds.
@@ -74,15 +74,6 @@ if(MSVC)
     target_compile_options(ReplayHUDHook PRIVATE /W4 /permissive- /utf-8 /EHsc)
 endif()
 
-target_link_libraries(ReplayHUDHook PRIVATE
-    user32
-    d3d11
-    d2d1
-    dwrite
-    dxgi
-    minhook
-)
-
+target_link_libraries(ReplayHUDHook PRIVATE uih::uih)
 set_target_properties(ReplayHUDHook PROPERTIES OUTPUT_NAME "ReplayHUDHook")
-
 set_target_properties(ReplayHUD PROPERTIES OUTPUT_NAME "ReplayHUD")
