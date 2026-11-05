@@ -22,6 +22,7 @@ namespace {
 HANDLE g_overlayMapping = nullptr;
 HANDLE g_overlayMutex = nullptr;
 std::atomic<HANDLE> g_overlayReadyEvent{ nullptr };
+std::atomic<unsigned int> g_mappingOpenAttempts{ 0 };
 std::atomic<unsigned int> g_readyEventOpenAttempts{ 0 };
 std::atomic_bool g_loggedFirstFrame{ false };
 const replayhud::OverlayPayload* g_overlayPayload = nullptr;
@@ -65,6 +66,8 @@ void LogHook(const wchar_t* message) {
 
 bool InitializeOverlayMapping() {
     if (g_overlayPayload) return true;
+    const unsigned int attempt = g_mappingOpenAttempts.fetch_add(1, std::memory_order_relaxed);
+    if (attempt != 0 && attempt % 30 != 0) return false;
     g_overlayMutex = OpenMutexW(SYNCHRONIZE | MUTEX_MODIFY_STATE, FALSE,
         replayhud::kOverlayMutexName);
     if (!g_overlayMutex) return false;
