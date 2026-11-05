@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <cwchar>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <new>
