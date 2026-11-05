@@ -91,20 +91,20 @@ DWORD WINAPI LoadReplayHUDHook(LPVOID parameter) {
     const HMODULE proxyModule = static_cast<HMODULE>(parameter);
     const std::wstring hookPath = ExtractEmbeddedHook(proxyModule);
     if (hookPath.empty()) {
-        OutputDebugStringW(L"ReplayHUD D3D8 proxy: could not extract its embedded ReplayHUDHook.dll.\\r\\n");
+        OutputDebugStringW(L"ReplayHUD D3D8 proxy: could not extract its embedded ReplayHUDHook.dll.\r\n");
         return 1;
     }
 
     HMODULE hook = LoadLibraryW(hookPath.c_str());
     if (!hook) {
         wchar_t message[512]{};
-        swprintf_s(message, L"ReplayHUD D3D8 proxy: failed to load %s (error %lu).\\r\\n",
+        swprintf_s(message, L"ReplayHUD D3D8 proxy: failed to load %s (error %lu).\r\n",
             hookPath.c_str(), GetLastError());
         OutputDebugStringW(message);
         return 1;
     }
 
-    OutputDebugStringW(L"ReplayHUD D3D8 proxy: embedded multi-API overlay hook loaded.\\r\\n");
+    OutputDebugStringW(L"ReplayHUD D3D8 proxy: embedded multi-API overlay hook loaded.\r\n");
     return 0;
 }
 
@@ -119,7 +119,7 @@ BOOL WINAPI DllMain(HMODULE module, DWORD reason, LPVOID) {
         if (thread) {
             CloseHandle(thread);
         } else {
-            OutputDebugStringW(L"ReplayHUD D3D8 proxy: failed to create bootstrap thread.\\r\\n");
+            OutputDebugStringW(L"ReplayHUD D3D8 proxy: failed to create bootstrap thread.\r\n");
         }
     }
     return TRUE;
