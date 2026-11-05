@@ -21,7 +21,6 @@
 #include <cstdlib>
 #include <cwchar>
 #include <iterator>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -134,8 +133,6 @@ HFONT g_uiFont = nullptr;
 HFONT g_uiBoldFont = nullptr;
 HANDLE g_overlayMapping = nullptr;
 replayhud::OverlayPayload* g_overlayPayload = nullptr;
-std::mutex g_injectedProcessesMutex;
-std::map<DWORD, HANDLE> g_injectedProcesses;
 
 void Log(const std::wstring& message);
 
@@ -416,44 +413,9 @@ bool EnsureForegroundHookInjected() {
         return false;
     }
 
-    bool processTracked = false;
-    {
-        std::lock_guard<std::mutex> lock(g_injectedProcessesMutex);
-        auto existing = g_injectedProcesses.find(processId);
-        if (existing != g_injectedProcesses.end()) {
-            const DWORD wait = WaitForSingleObject(existing->second, 0);
-            if (wait == WAIT_TIMEOUT) {
-                processTracked = true;
-            } else {
-                CloseHandle(existing->second);
-                g_injectedProcesses.erase(existing);
-            }
-        }
-    }
-
-    auto rememberProcess = [processId]() {
-        HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, processId);
-        if (!process) return;
-        std::lock_guard<std::mutex> lock(g_injectedProcessesMutex);
-        auto existing = g_injectedProcesses.find(processId);
-        if (existing != g_injectedProcesses.end()) {
-            CloseHandle(existing->second);
-            existing->second = process;
-        } else {
-            g_injectedProcesses.emplace(processId, process);
-        }
-    };
-
-    if (!processTracked) {
-        if (hookAlreadyLoaded) {
-            rememberProcess();
-        } else {
-            if (!InjectHookIntoProcess(processId, hookDllPath)) {
-                CloseHandle(readyEvent);
-                return false;
-            }
-            rememberProcess();
-        }
+    if (!hookAlreadyLoaded && !InjectHookIntoProcess(processId, hookDllPath)) {
+        CloseHandle(readyEvent);
+        return false;
     }
 
     // Only suppress the desktop toast once the injected renderer has actually
@@ -461,14 +423,6 @@ bool EnsureForegroundHookInjected() {
     const DWORD wait = WaitForSingleObject(readyEvent, 1000);
     CloseHandle(readyEvent);
     return wait == WAIT_OBJECT_0;
-}
-
-void CloseInjectedProcessHandles() {
-    std::lock_guard<std::mutex> lock(g_injectedProcessesMutex);
-    for (auto& entry : g_injectedProcesses) {
-        if (entry.second) CloseHandle(entry.second);
-    }
-    g_injectedProcesses.clear();
 }
 
 int DpiScale(HWND hwnd, int value) {
@@ -1870,7 +1824,6 @@ LRESULT CALLBACK MainWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM l
     case WM_DESTROY:
         g_running.store(false);
         ShutdownOverlayBridge();
-        CloseInjectedProcessHandles();
         if (g_shutdownEvent) SetEvent(g_shutdownEvent);
         ShutdownActiveWebSocket();
         Shell_NotifyIconW(NIM_DELETE, &g_trayData);
