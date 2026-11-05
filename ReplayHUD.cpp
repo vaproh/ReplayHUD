@@ -135,7 +135,7 @@ HFONT g_uiBoldFont = nullptr;
 HANDLE g_overlayMapping = nullptr;
 replayhud::OverlayPayload* g_overlayPayload = nullptr;
 std::mutex g_injectedProcessesMutex;
-std::map<DWORD, bool> g_injectedProcesses;
+std::map<DWORD, HANDLE> g_injectedProcesses;
 
 void Log(const std::wstring& message);
 
@@ -364,13 +364,34 @@ void EnsureForegroundHookInjected() {
 
     {
         std::lock_guard<std::mutex> lock(g_injectedProcessesMutex);
-        if (g_injectedProcesses.count(processId) != 0) return;
+        auto existing = g_injectedProcesses.find(processId);
+        if (existing != g_injectedProcesses.end()) {
+            const DWORD wait = WaitForSingleObject(existing->second, 0);
+            if (wait == WAIT_TIMEOUT) return;
+            CloseHandle(existing->second);
+            g_injectedProcesses.erase(existing);
+        }
     }
 
-    if (InjectHookIntoProcess(processId, hookDllPath)) {
+    auto rememberProcess = [processId]() {
+        HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, processId);
+        if (!process) return;
         std::lock_guard<std::mutex> lock(g_injectedProcessesMutex);
-        g_injectedProcesses[processId] = true;
+        auto existing = g_injectedProcesses.find(processId);
+        if (existing != g_injectedProcesses.end()) {
+            CloseHandle(existing->second);
+            existing->second = process;
+        } else {
+            g_injectedProcesses.emplace(processId, process);
+        }
+    };
+
+    if (IsReplayHUDHookLoaded(processId)) {
+        rememberProcess();
+        return;
     }
+
+    if (InjectHookIntoProcess(processId, hookDllPath)) rememberProcess();
 }
 
 int DpiScale(HWND hwnd, int value) {
