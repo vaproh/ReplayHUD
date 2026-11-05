@@ -6,7 +6,7 @@ project(ReplayHUD VERSION 1.3.0 LANGUAGES CXX)
 # older hook mapped after ReplayHUD exits, so new builds must never overwrite it.
 string(RANDOM LENGTH 16 ALPHABET 0123456789abcdef REPLAYHUD_BUILD_ID)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ReplayHUDBuildConfig.h"
-    "#pragma once\n#define REPLAYHUD_BUILD_ID L\" ${REPLAYHUD_BUILD_ID}\"\n")
+    "#pragma once\n#define REPLAYHUD_BUILD_ID L\"${REPLAYHUD_BUILD_ID}\"\n")
 
 set(REPLAYHUD_X86_HOOK "" CACHE FILEPATH "Path to the x86 ReplayHUDHook.dll used by the x64 app")
 set(REPLAYHUD_X86_INJECTOR "" CACHE FILEPATH "Path to the x86 ReplayHUDInjector32.exe used by the x64 app")
@@ -172,7 +172,5 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     target_sources(ReplayHUD PRIVATE "${REPLAYHUD_APP_RESOURCES_RC}")
     add_dependencies(ReplayHUD ReplayHUDHook)
 endif()
-
-target_compile_definitions(ReplayHUD PRIVATE REPLAYHUD_BUILD_ID=L\" ${REPLAYHUD_BUILD_ID}\")
 
 set_target_properties(ReplayHUD PROPERTIES OUTPUT_NAME "ReplayHUD")
