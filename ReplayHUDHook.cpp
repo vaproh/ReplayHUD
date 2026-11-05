@@ -92,6 +92,8 @@ bool ReadOverlayPayload(replayhud::OverlayPayload& snapshot) {
     snapshot.version = g_overlayPayload->version;
     snapshot.active = g_overlayPayload->active;
     snapshot.expiresAtTick = g_overlayPayload->expiresAtTick;
+    snapshot.position = g_overlayPayload->position;
+    snapshot.marginPx = g_overlayPayload->marginPx;
     memcpy(snapshot.title, g_overlayPayload->title, sizeof(snapshot.title));
     memcpy(snapshot.subtitle, g_overlayPayload->subtitle, sizeof(snapshot.subtitle));
     ReleaseMutex(g_overlayMutex);
@@ -133,19 +135,24 @@ void DrawOverlay() {
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     if (!draw || display.x <= 0.0f || display.y <= 0.0f) return;
 
-    constexpr float margin = 24.0f;
     constexpr float panelWidth = 440.0f;
     constexpr float panelHeight = 110.0f;
-    const float width = (std::min)(panelWidth, (std::max)(160.0f, display.x - margin * 2.0f));
-    const float left = (std::max)(margin, display.x - width - margin);
-    const ImVec2 min(left, margin);
-    const ImVec2 max(left + width, margin + panelHeight);
+    const float margin = static_cast<float>((std::clamp)(payload.marginPx, 8L, 200L));
+    const float width = (std::min)(panelWidth, (std::max)(1.0f, display.x - margin * 2.0f));
+    const float height = (std::min)(panelHeight, (std::max)(1.0f, display.y - margin * 2.0f));
+    const LONG position = (std::clamp)(payload.position, 0L, 3L);
+    const bool leftAligned = (position == 1 || position == 3);
+    const bool bottomAligned = (position >= 2);
+    const float left = leftAligned ? margin : (std::max)(margin, display.x - width - margin);
+    const float top = bottomAligned ? (std::max)(margin, display.y - height - margin) : margin;
+    const ImVec2 min(left, top);
+    const ImVec2 max(left + width, top + height);
 
     draw->AddRectFilled(min, max, IM_COL32(20, 23, 29, 230), 16.0f);
     draw->AddRect(min, max, IM_COL32(54, 61, 72, 255), 16.0f, 1.0f, ImDrawFlags_RoundCornersAll);
 
-    const ImVec2 titlePosition(left + 20.0f, margin + 17.0f);
-    const ImVec2 subtitlePosition(left + 20.0f, margin + 57.0f);
+    const ImVec2 titlePosition(left + 20.0f, top + 17.0f);
+    const ImVec2 subtitlePosition(left + 20.0f, top + 57.0f);
     draw->AddText(titlePosition, IM_COL32(240, 243, 247, 255), title.c_str());
     draw->AddText(subtitlePosition, IM_COL32(157, 166, 180, 255), subtitle.c_str());
 }
