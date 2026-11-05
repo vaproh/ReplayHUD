@@ -12,8 +12,9 @@ include(FetchContent)
 
 # Universal Dear ImGui Hook supplies the tested D3D9/10/11/12, Vulkan and
 # OpenGL render backends. Keep the dependency pinned; do not follow master.
+option(REPLAYHUD_BUILD_BACKEND_TESTS "Build the upstream graphics backend test hosts" ON)
 set(UIH_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
-set(UIH_BUILD_TESTS ON CACHE BOOL "" FORCE)
+set(UIH_BUILD_TESTS ${REPLAYHUD_BUILD_BACKEND_TESTS} CACHE BOOL "" FORCE)
 set(UIH_STATIC_RUNTIME ON CACHE BOOL "" FORCE)
 FetchContent_Declare(universal_imgui_hook
     GIT_REPOSITORY https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook.git
