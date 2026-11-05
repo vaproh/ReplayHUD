@@ -147,6 +147,8 @@ void PublishOverlayPayload(const std::wstring& title, const std::wstring& subtit
         g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
         g_overlayPayload->active = 1;
         g_overlayPayload->expiresAtTick = GetTickCount64() + durationMs;
+        ++g_overlayPayload->sequence;
+        if (g_overlayPayload->sequence == 0) ++g_overlayPayload->sequence;
         g_overlayPayload->position = std::clamp(position, 0, 3);
         g_overlayPayload->marginPx = std::clamp(marginPx, 8, 200);
         wcsncpy_s(g_overlayPayload->title, title.c_str(), _TRUNCATE);
@@ -206,6 +208,7 @@ bool InitializeOverlayBridge() {
     g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
     g_overlayPayload->active = 0;
     g_overlayPayload->expiresAtTick = 0;
+    g_overlayPayload->sequence = 0;
     g_overlayPayload->position = 0;
     g_overlayPayload->marginPx = 24;
     g_overlayPayload->title[0] = L'\0';
