@@ -108,6 +108,6 @@ if(MSVC)
     target_compile_options(ReplayHUDHook PRIVATE /W4 /permissive- /utf-8 /EHsc)
 endif()
 
-target_link_libraries(ReplayHUDHook PRIVATE uih::uih)
+target_link_libraries(ReplayHUDHook PRIVATE uih::uih user32)
 set_target_properties(ReplayHUDHook PROPERTIES OUTPUT_NAME "ReplayHUDHook")
 set_target_properties(ReplayHUD PROPERTIES OUTPUT_NAME "ReplayHUD")
