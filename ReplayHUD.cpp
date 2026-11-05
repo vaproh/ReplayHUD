@@ -1450,7 +1450,7 @@ void ShowNotification(const std::wstring& path, bool test,
     }
 
 
-    if (!customTitle.empty() || (!test && !path.empty())) {
+    if (!test && customTitle.empty() && !path.empty()) {
         if (settings.sound && !PlaySoundW(L"SystemNotification", nullptr, SND_ALIAS | SND_ASYNC | SND_NODEFAULT))
             MessageBeep(MB_OK);
     }
