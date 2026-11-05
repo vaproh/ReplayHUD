@@ -111,7 +111,7 @@ cmake -S . -B build -A x64
 cmake --build build --config Release --parallel
 ```
 
-The build uses the static MSVC runtime (`/MT`). The application icon and Windows file-version metadata are embedded from `assets/ReplayHUD.ico` and `ReplayHUD.rc.in`.
+The build uses the static MSVC runtime (`/MT`). CMake fetches the pinned MinHook v1.3.4 source at configure time. The application icon and Windows file-version metadata are embedded from `assets/ReplayHUD.ico` and `ReplayHUD.rc.in`.
 
 ## Automated GitHub Releases
 
@@ -129,7 +129,7 @@ git push origin v1.1.0
 For a tagged build, GitHub Actions:
 
 1. Configures and compiles the x64 Release executable on a Windows runner.
-2. Packages `ReplayHUD.exe`, `README.md`, and `LICENSE.txt` into `ReplayHUD-Windows-x64.zip`.
+2. Packages `ReplayHUD.exe`, `ReplayHUDHook.dll`, `README.md`, and `LICENSE.txt` into `ReplayHUD-Windows-x64.zip`.
 3. Publishes the executable and ZIP to a GitHub Release.
 4. Generates release notes automatically from repository changes.
 
