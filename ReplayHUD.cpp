@@ -191,16 +191,24 @@ bool InitializeOverlayBridge() {
     }
 
     const DWORD wait = WaitForSingleObject(g_overlayMutex, 100);
-    if (wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED) {
-        g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
-        g_overlayPayload->active = 0;
-        g_overlayPayload->expiresAtTick = 0;
-        g_overlayPayload->position = 0;
-        g_overlayPayload->marginPx = 24;
-        g_overlayPayload->title[0] = L'\0';
-        g_overlayPayload->subtitle[0] = L'\0';
-        ReleaseMutex(g_overlayMutex);
+    if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
+        UnmapViewOfFile(g_overlayPayload);
+        g_overlayPayload = nullptr;
+        CloseHandle(g_overlayMapping);
+        g_overlayMapping = nullptr;
+        CloseHandle(g_overlayMutex);
+        g_overlayMutex = nullptr;
+        return false;
     }
+
+    g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
+    g_overlayPayload->active = 0;
+    g_overlayPayload->expiresAtTick = 0;
+    g_overlayPayload->position = 0;
+    g_overlayPayload->marginPx = 24;
+    g_overlayPayload->title[0] = L'\0';
+    g_overlayPayload->subtitle[0] = L'\0';
+    ReleaseMutex(g_overlayMutex);
     return true;
 }
 
