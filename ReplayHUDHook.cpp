@@ -28,6 +28,19 @@ std::atomic_bool g_loggedFirstFrame{ false };
 std::atomic<ULONGLONG> g_lastQueuedNotification{ 0 };
 std::atomic<ULONGLONG> g_lastReadyNotification{ 0 };
 const replayhud::OverlayPayload* g_overlayPayload = nullptr;
+ImFont* g_titleFont = nullptr;
+ImFont* g_bodyFont = nullptr;
+ImFont* g_hintFont = nullptr;
+
+void SetupOverlayUi() {
+    ImGuiIO& io = ImGui::GetIO();
+    g_titleFont = io.Fonts->AddFontFromFileTTF("C:\\\\Windows\\\\Fonts\\\\segoeuib.ttf", 17.0f);
+    g_bodyFont = io.Fonts->AddFontFromFileTTF("C:\\\\Windows\\\\Fonts\\\\segoeui.ttf", 16.0f);
+    g_hintFont = io.Fonts->AddFontFromFileTTF("C:\\\\Windows\\\\Fonts\\\\segoeui.ttf", 12.0f);
+    if (!g_titleFont) g_titleFont = io.FontDefault;
+    if (!g_bodyFont) g_bodyFont = io.FontDefault;
+    if (!g_hintFont) g_hintFont = io.FontDefault;
+}
 
 void LogHook(const wchar_t* message) {
     OutputDebugStringW(message);
@@ -189,12 +202,18 @@ void DrawOverlay() {
     draw->AddRectFilled(innerMin, innerMax, panelColor, 16.0f - borderWidth,
         ImDrawFlags_RoundCornersAll);
 
-    const ImVec2 titlePosition(left + 20.0f, top + 17.0f);
-    const ImVec2 subtitlePosition(left + 20.0f, top + 57.0f);
+    // Match the desktop toast: green Segoe UI heading, clean body text, and a muted footer.
+    draw->AddRectFilled(ImVec2(left + 20.0f, top + 18.0f),
+        ImVec2(left + 23.0f, top + 91.0f), IM_COL32(118, 185, 0, 255), 1.5f);
+    const ImVec2 titlePosition(left + 34.0f, top + 15.0f);
+    const ImVec2 subtitlePosition(left + 34.0f, top + 43.0f);
+    const ImVec2 hintPosition(left + 34.0f, top + 78.0f);
     draw->PushClipRect(ImVec2(left + 16.0f, top + 10.0f),
         ImVec2(left + width - 16.0f, top + height - 10.0f), true);
-    draw->AddText(titlePosition, IM_COL32(240, 243, 247, 255), title.c_str());
-    draw->AddText(subtitlePosition, IM_COL32(157, 166, 180, 255), subtitle.c_str());
+    draw->AddText(g_titleFont, 17.0f, titlePosition, IM_COL32(118, 185, 0, 255), title.c_str());
+    draw->AddText(g_bodyFont, 16.0f, subtitlePosition, IM_COL32(240, 243, 247, 255), subtitle.c_str());
+    draw->AddText(g_hintFont, 12.0f, hintPosition, IM_COL32(157, 166, 180, 255),
+        "ReplayHUD  \\xe2\\x80\\xa2  OBS Replay Buffer");
     draw->PopClipRect();
 
     // The UIH render callback runs before ImGui::Render(). Wait until the
@@ -223,6 +242,7 @@ DWORD WINAPI HookThreadProc(LPVOID) {
     config.unloadKey = 0;
     config.menuButtons = 0;
     config.debugLog = GetEnvironmentVariableW(L"REPLAYHUD_DEBUG", nullptr, 0) > 0;
+    config.setup = SetupOverlayUi;
     config.render = DrawOverlay;
 
     // Universal Dear ImGui Hook owns API detection, hook installation, device
