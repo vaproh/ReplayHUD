@@ -1,4 +1,7 @@
 /build/
+/build-x86/
+/dist/
+/ReplayHUD-Windows.zip
 /out/
 /Release/
 /Debug/
