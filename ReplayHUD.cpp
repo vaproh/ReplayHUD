@@ -139,7 +139,7 @@ std::map<DWORD, bool> g_injectedProcesses;
 
 void Log(const std::wstring& message);
 
-void PublishOverlayPayload(const std::wstring& title, const std::wstring& subtitle, UINT durationMs) {
+void PublishOverlayPayload(const std::wstring& title, const std::wstring& subtitle, UINT durationMs, int position, int marginPx) {
     if (!g_overlayPayload) return;
     HANDLE mutex = OpenMutexW(SYNCHRONIZE | MUTEX_MODIFY_STATE, FALSE,
         replayhud::kOverlayMutexName);
@@ -149,6 +149,8 @@ void PublishOverlayPayload(const std::wstring& title, const std::wstring& subtit
         g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
         g_overlayPayload->active = 1;
         g_overlayPayload->expiresAtTick = GetTickCount64() + durationMs;
+        g_overlayPayload->position = std::clamp(position, 0, 3);
+        g_overlayPayload->marginPx = std::clamp(marginPx, 8, 200);
         wcsncpy_s(g_overlayPayload->title, title.c_str(), _TRUNCATE);
         wcsncpy_s(g_overlayPayload->subtitle, subtitle.c_str(), _TRUNCATE);
         ReleaseMutex(mutex);
@@ -166,6 +168,8 @@ void ClearOverlayPayload() {
         g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
         g_overlayPayload->active = 0;
         g_overlayPayload->expiresAtTick = 0;
+        g_overlayPayload->position = 0;
+        g_overlayPayload->marginPx = 24;
         g_overlayPayload->title[0] = L'\0';
         g_overlayPayload->subtitle[0] = L'\0';
         ReleaseMutex(mutex);
@@ -195,6 +199,8 @@ bool InitializeOverlayBridge() {
         g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
         g_overlayPayload->active = 0;
         g_overlayPayload->expiresAtTick = 0;
+        g_overlayPayload->position = 0;
+        g_overlayPayload->marginPx = 24;
         g_overlayPayload->title[0] = L'\0';
         g_overlayPayload->subtitle[0] = L'\0';
         ReleaseMutex(mutex);
@@ -1283,7 +1289,7 @@ void ShowNotification(const std::wstring& path, bool test,
             MessageBeep(MB_ICONASTERISK);
     }
 
-    PublishOverlayPayload(g_toastTitle, g_toastSubtitle, settings.durationMs);
+    PublishOverlayPayload(g_toastTitle, g_toastSubtitle, settings.durationMs, settings.position, settings.marginPx);
     EnsureForegroundHookInjected();
 
     POINT cursor{};
