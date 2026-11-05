@@ -72,6 +72,20 @@ target_link_libraries(ReplayHUD PRIVATE
     shcore
 )
 
+# This target is built by the separate Win32 configuration. The x64 main
+# application launches it to inject the x86 hook into 32-bit games.
+if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    add_executable(ReplayHUDInjector32 WIN32 ReplayHUDInjector32.cpp)
+    target_compile_features(ReplayHUDInjector32 PRIVATE cxx_std_17)
+    target_link_libraries(ReplayHUDInjector32 PRIVATE shell32)
+    if(MSVC)
+        set_property(TARGET ReplayHUDInjector32 PROPERTY
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+        )
+        target_compile_options(ReplayHUDInjector32 PRIVATE /W4 /permissive- /utf-8 /EHsc)
+    endif()
+endif()
+
 add_library(ReplayHUDHook SHARED
     ReplayHUDHook.cpp
     ReplayHUDOverlayBridge.h
