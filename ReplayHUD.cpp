@@ -58,6 +58,8 @@ constexpr UINT kTrayId = 1;
 constexpr UINT kEventSubscriptionOutputs = 1u << 6;
 constexpr int kToastWidth = 440;
 constexpr int kToastHeight = 112;
+constexpr int kToastCornerDiameter = 22;
+constexpr int kToastBorderThickness = 1;
 constexpr int kMenuSettings = 2001;
 constexpr int kMenuTest = 2002;
 constexpr int kMenuOpenLast = 2003;
@@ -1398,8 +1400,9 @@ void ShowNotification(const std::wstring& path, bool test,
 
     KillTimer(g_overlayWindow, kToastTimer);
     KillTimer(g_overlayWindow, kAnimationTimer);
-    HRGN toastRegion = CreateRoundRectRgn(0, 0, width + 1, height + 1,
-        scaleForTarget(22), scaleForTarget(22));
+    const int cornerDiameter = scaleForTarget(kToastCornerDiameter);
+    HRGN toastRegion = CreateRoundRectRgn(0, 0, width, height,
+        cornerDiameter, cornerDiameter);
     if (toastRegion && !SetWindowRgn(g_overlayWindow, toastRegion, TRUE))
         DeleteObject(toastRegion);
     SetWindowPos(g_overlayWindow, HWND_TOPMOST, x + scaleForTarget(18), y,
@@ -1472,16 +1475,30 @@ LRESULT CALLBACK OverlayWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
             return 0;
         }
 
+        HBRUSH borderBrush = CreateSolidBrush(kBorder);
         HBRUSH bg = CreateSolidBrush(kBackground);
         HBRUSH panel = CreateSolidBrush(kPanel);
-        HPEN border = CreatePen(PS_SOLID, 1, kBorder);
-        HGDIOBJ oldBrush = SelectObject(buffer, bg);
-        HGDIOBJ oldPen = SelectObject(buffer, border);
-        RoundRect(buffer, 0, 0, width, height, DpiScale(hwnd, 18), DpiScale(hwnd, 18));
+        HGDIOBJ nullPen = GetStockObject(NULL_PEN);
+        HGDIOBJ oldPen = SelectObject(buffer, nullPen);
+        HGDIOBJ oldBrush = SelectObject(buffer, borderBrush);
+
+        // Paint the border as a solid outer rounded shape, then inset the
+        // background. A stroked GDI RoundRect can leave uneven corner pixels
+        // when its pen is clipped by the layered window's rounded region.
+        const int cornerDiameter = DpiScale(hwnd, kToastCornerDiameter);
+        const int borderWidth = (std::max)(1, DpiScale(hwnd, kToastBorderThickness));
+        RoundRect(buffer, 0, 0, width, height, cornerDiameter, cornerDiameter);
+
+        RECT innerRect{ borderWidth, borderWidth, width - borderWidth, height - borderWidth };
+        SelectObject(buffer, bg);
+        const int innerCornerDiameter = (std::max)(0, cornerDiameter - 2 * borderWidth);
+        RoundRect(buffer, innerRect.left, innerRect.top, innerRect.right, innerRect.bottom,
+            innerCornerDiameter, innerCornerDiameter);
+
         SelectObject(buffer, oldBrush);
         SelectObject(buffer, oldPen);
+        DeleteObject(borderBrush);
         DeleteObject(bg);
-        DeleteObject(border);
 
         // Accent strip and icon tile.
         HBRUSH accent = CreateSolidBrush(kGreen);
@@ -1951,7 +1968,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         return 1;
     }
 
-    HRGN region = CreateRoundRectRgn(0, 0, kToastWidth + 1, kToastHeight + 1, 22, 22);
+    HRGN region = CreateRoundRectRgn(0, 0, kToastWidth, kToastHeight,
+        kToastCornerDiameter, kToastCornerDiameter);
     if (region && !SetWindowRgn(g_overlayWindow, region, TRUE))
         DeleteObject(region);
 
