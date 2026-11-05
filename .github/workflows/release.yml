@@ -17,6 +17,8 @@ jobs:
     name: Build Windows x64
     runs-on: windows-latest
     timeout-minutes: 90
+    env:
+      UIH_TEST_FULLSCREEN: 1
 
     steps:
       - name: Check out source
