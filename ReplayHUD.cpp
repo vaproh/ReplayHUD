@@ -32,6 +32,7 @@
 
 #include "ReplayHUDOverlayBridge.h"
 #include "resource.h"
+#include "ReplayHUDBuildConfig.h"
 
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
@@ -138,7 +139,13 @@ HANDLE g_overlayMapping = nullptr;
 HANDLE g_overlayMutex = nullptr;
 replayhud::OverlayPayload* g_overlayPayload = nullptr;
 
+std::wstring g_hookDllPath;
+std::wstring g_x86HookDllPath;
+std::wstring g_x86InjectorPath;
+std::wstring g_x86RuntimeDirectory;
+
 void Log(const std::wstring& message);
+std::wstring GetDataDirectory();
 
 void PublishOverlayPayload(const std::wstring& title, const std::wstring& subtitle, UINT durationMs, int position, int marginPx) {
     if (!g_overlayPayload || !g_overlayMutex) return;
@@ -233,15 +240,111 @@ void ShutdownOverlayBridge() {
     }
 }
 
-std::wstring GetHookDllPath() {
-    wchar_t modulePath[MAX_PATH]{};
-    if (!GetModuleFileNameW(nullptr, modulePath, static_cast<DWORD>(std::size(modulePath)))) return L"";
-    std::wstring path(modulePath);
-    const size_t separator = path.find_last_of(L"\\/");
-    if (separator == std::wstring::npos) return L"";
-    path.resize(separator + 1);
-    path += L"ReplayHUDHook.dll";
-    return path;
+struct EmbeddedResource {
+    const BYTE* data = nullptr;
+    DWORD size = 0;
+};
+
+bool LoadEmbeddedResource(HINSTANCE module, int resourceId, EmbeddedResource& result) {
+    HRSRC resource = FindResourceW(module, MAKEINTRESOURCEW(resourceId), RT_RCDATA);
+    if (!resource) return false;
+
+    HGLOBAL loaded = LoadResource(module, resource);
+    if (!loaded) return false;
+
+    result.data = static_cast<const BYTE*>(LockResource(loaded));
+    result.size = SizeofResource(module, resource);
+    return result.data != nullptr && result.size > 0;
+}
+
+bool EnsureDirectoryExists(const std::wstring& path) {
+    if (CreateDirectoryW(path.c_str(), nullptr)) return true;
+    if (GetLastError() != ERROR_ALREADY_EXISTS) return false;
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES &&
+        (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+
+bool ResourceFileMatches(const std::wstring& path, const EmbeddedResource& resource) {
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+
+    LARGE_INTEGER length{};
+    bool matches = GetFileSizeEx(file, &length) != FALSE &&
+        length.QuadPart == static_cast<LONGLONG>(resource.size);
+    if (matches) {
+        std::vector<BYTE> contents(resource.size);
+        DWORD read = 0;
+        matches = ReadFile(file, contents.data(), resource.size, &read, nullptr) != FALSE &&
+            read == resource.size &&
+            memcmp(contents.data(), resource.data, resource.size) == 0;
+    }
+
+    CloseHandle(file);
+    return matches;
+}
+
+bool WriteEmbeddedResourceFile(const std::wstring& path, const EmbeddedResource& resource) {
+    if (ResourceFileMatches(path, resource)) return true;
+
+    const std::wstring temporaryPath = path + L".tmp-" +
+        std::to_wstring(GetCurrentProcessId());
+    HANDLE file = CreateFileW(temporaryPath.c_str(), GENERIC_WRITE, 0,
+        nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+
+    DWORD written = 0;
+    const bool saved = WriteFile(file, resource.data, resource.size, &written, nullptr) != FALSE &&
+        written == resource.size && FlushFileBuffers(file) != FALSE;
+    CloseHandle(file);
+
+    if (!saved || !MoveFileExW(temporaryPath.c_str(), path.c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DeleteFileW(temporaryPath.c_str());
+        return false;
+    }
+    return true;
+}
+
+bool InitializeRuntimeFiles(HINSTANCE module) {
+    EmbeddedResource hookX64{};
+    EmbeddedResource hookX86{};
+    EmbeddedResource injectorX86{};
+    if (!LoadEmbeddedResource(module, IDR_REPLAYHUD_HOOK_X64, hookX64) ||
+        !LoadEmbeddedResource(module, IDR_REPLAYHUD_HOOK_X86, hookX86) ||
+        !LoadEmbeddedResource(module, IDR_REPLAYHUD_INJECTOR_X86, injectorX86)) {
+        Log(L"One or more embedded game overlay components are missing from this executable.");
+        return false;
+    }
+
+    const std::wstring runtimeRoot = GetDataDirectory() +
+        L"\\Runtime\\" + REPLAYHUD_BUILD_ID;
+    const std::wstring x64Directory = runtimeRoot + L"\\x64";
+    g_x86RuntimeDirectory = runtimeRoot + L"\\x86";
+    g_hookDllPath = x64Directory + L"\\ReplayHUDHook.dll";
+    g_x86HookDllPath = g_x86RuntimeDirectory + L"\\ReplayHUDHook.dll";
+    g_x86InjectorPath = g_x86RuntimeDirectory + L"\\ReplayHUDInjector32.exe";
+
+    const std::wstring runtimeDirectory = GetDataDirectory() + L"\\Runtime";
+    if (!EnsureDirectoryExists(runtimeDirectory) ||
+        !EnsureDirectoryExists(runtimeRoot) ||
+        !EnsureDirectoryExists(x64Directory) ||
+        !EnsureDirectoryExists(g_x86RuntimeDirectory)) {
+        Log(L"Could not create the ReplayHUD runtime directory under Local AppData.");
+        return false;
+    }
+
+    if (!WriteEmbeddedResourceFile(g_hookDllPath, hookX64) ||
+        !WriteEmbeddedResourceFile(g_x86HookDllPath, hookX86) ||
+        !WriteEmbeddedResourceFile(g_x86InjectorPath, injectorX86)) {
+        Log(L"Could not extract the embedded game overlay components.");
+        return false;
+    }
+
+    Log(L"Embedded x64/x86 overlay components are ready.");
+    return true;
 }
 
 bool InjectHookIntoProcess(DWORD processId, const std::wstring& hookDllPath) {
@@ -260,14 +363,12 @@ bool InjectHookIntoProcess(DWORD processId, const std::wstring& hookDllPath) {
         // WOW64 target. Delegate the injection to the packaged 32-bit helper.
         CloseHandle(process);
 
-        const size_t separator = hookDllPath.find_last_of(L"\\/");
-        if (separator == std::wstring::npos) return false;
-        const std::wstring appDirectory = hookDllPath.substr(0, separator + 1);
-        const std::wstring helperPath = appDirectory + L"ReplayHUDInjector32.exe";
-        const std::wstring x86HookPath = appDirectory + L"x86\\ReplayHUDHook.dll";
-        if (GetFileAttributesW(helperPath.c_str()) == INVALID_FILE_ATTRIBUTES ||
+        const std::wstring helperPath = g_x86InjectorPath;
+        const std::wstring x86HookPath = g_x86HookDllPath;
+        if (helperPath.empty() || x86HookPath.empty() ||
+            GetFileAttributesW(helperPath.c_str()) == INVALID_FILE_ATTRIBUTES ||
             GetFileAttributesW(x86HookPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
-            Log(L"32-bit target detected, but ReplayHUDInjector32.exe or x86\\ReplayHUDHook.dll is missing.");
+            Log(L"32-bit target detected, but the embedded x86 overlay components are unavailable.");
             return false;
         }
 
@@ -277,7 +378,7 @@ bool InjectHookIntoProcess(DWORD processId, const std::wstring& hookDllPath) {
         startup.cb = sizeof(startup);
         PROCESS_INFORMATION child{};
         if (!CreateProcessW(helperPath.c_str(), command.data(), nullptr, nullptr, FALSE,
-                CREATE_NO_WINDOW, nullptr, appDirectory.c_str(), &startup, &child)) {
+                CREATE_NO_WINDOW, nullptr, g_x86RuntimeDirectory.c_str(), &startup, &child))
             Log(L"Failed to start the 32-bit ReplayHUD injection helper.");
             return false;
         }
@@ -401,7 +502,7 @@ bool InspectOverlayTargetModules(DWORD processId, bool& hookLoaded) {
 bool EnsureForegroundHookInjected(HANDLE readyEvent) {
     if (!readyEvent) return false;
 
-    const std::wstring hookDllPath = GetHookDllPath();
+    const std::wstring hookDllPath = g_hookDllPath;
     if (hookDllPath.empty() || GetFileAttributesW(hookDllPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
         return false;
     }
@@ -1917,6 +2018,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     g_settingsBackgroundBrush = CreateSolidBrush(kBackground);
 
     LoadSettings();
+    if (!InitializeRuntimeFiles(instance)) {
+        Log(L"In-game overlay is unavailable; desktop notifications will continue to work.");
+    }
     if (!RegisterWindowClasses(instance)) {
         MessageBoxW(nullptr, L"Could not register ReplayHUD window classes.",
             L"ReplayHUD", MB_OK | MB_ICONERROR);
