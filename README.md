@@ -135,7 +135,7 @@ git push origin v1.1.0
 For a tagged build, GitHub Actions:
 
 1. Builds the x64 application and hook, plus x86 hook, helper injector, and D3D8 proxy.
-2. Runs WARP smoke tests for D3D9/10/11/12 and software-driver smoke tests for Vulkan/OpenGL.
+2. Runs x64 and x86 smoke tests: D3D9 on the hosted device, WARP for D3D10/11/12, and Mesa software drivers for Vulkan/OpenGL; the x64 build also runs the graphics lifecycle regression suite.
 3. Packages both architectures, the D3D8 compatibility proxy, and required third-party license notices into `ReplayHUD-Windows.zip`.
 4. Publishes the ZIP to a GitHub Release and generates release notes.
 
