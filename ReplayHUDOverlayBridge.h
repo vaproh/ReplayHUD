@@ -6,6 +6,7 @@ namespace replayhud {
 
 constexpr wchar_t kOverlayMappingName[] = L"Local\\ReplayHUD.Overlay.v4";
 constexpr wchar_t kOverlayMutexName[] = L"Local\\ReplayHUD.Overlay.Mutex.v4";
+constexpr wchar_t kOverlayReadyEventName[] = L"Local\\ReplayHUD.Overlay.Ready.v1";
 constexpr ULONG kOverlayPayloadVersion = 4;
 constexpr size_t kOverlayTitleLength = 64;
 constexpr size_t kOverlaySubtitleLength = 256;
