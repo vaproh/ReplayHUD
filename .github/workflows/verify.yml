@@ -66,10 +66,68 @@ jobs:
               if data[:2] != b"MZ":
                   raise SystemExit(f"{path}: missing DOS header")
               pe = struct.unpack_from("<I", data, 0x3c)[0]
-              if data[pe:pe+4] != b"PE\0\0":
+              if data[pe:pe+4] != b"PE\\0\\0":
                   raise SystemExit(f"{path}: missing PE signature")
-              machine = struct.unpack_from("<H", data, pe + 4)[0]
-              return data, machine
+              machine, sections, _, _, _, optional_size = struct.unpack_from("<HHIIIH", data, pe + 4)
+              optional = pe + 24
+              magic = struct.unpack_from("<H", data, optional)[0]
+              directory_offset = optional + (96 if magic == 0x10b else 112 if magic == 0x20b else 0)
+              if not directory_offset:
+                  raise SystemExit(f"{path}: unsupported optional header 0x{magic:04x}")
+              resource_rva, resource_size = struct.unpack_from("<II", data, directory_offset + 16)
+              section_table = optional + optional_size
+              section_map = []
+              for i in range(sections):
+                  off = section_table + i * 40
+                  virtual_size, virtual_address, raw_size, raw_pointer = struct.unpack_from("<IIII", data, off + 8)
+                  section_map.append((virtual_address, max(virtual_size, raw_size), raw_pointer, raw_size))
+
+              def offset_for_rva(rva):
+                  for va, span, raw, raw_size in section_map:
+                      if va <= rva < va + span and rva - va < raw_size:
+                          return raw + rva - va
+                  raise SystemExit(f"{path}: RVA 0x{rva:x} is not backed by file data")
+
+              def resource_directory(directory_offset, wanted_id):
+                  named, ids = struct.unpack_from("<HH", data, directory_offset + 12)
+                  for i in range(named + ids):
+                      name, target = struct.unpack_from("<II", data, directory_offset + 16 + i * 8)
+                      if not (name & 0x80000000) and name == wanted_id:
+                          return target
+                  return None
+
+              def resource(resource_id):
+                  if not resource_rva or not resource_size:
+                      return None
+                  root = offset_for_rva(resource_rva)
+                  type_entry = resource_directory(root, 10)  # RT_RCDATA
+                  if type_entry is None or not (type_entry & 0x80000000):
+                      return None
+                  type_dir = root + (type_entry & 0x7fffffff)
+                  name_entry = resource_directory(type_dir, resource_id)
+                  if name_entry is None or not (name_entry & 0x80000000):
+                      return None
+                  name_dir = root + (name_entry & 0x7fffffff)
+                  _, count = struct.unpack_from("<HH", data, name_dir + 12)
+                  if count == 0:
+                      return None
+                  _, lang_entry = struct.unpack_from("<II", data, name_dir + 16)
+                  if not (lang_entry & 0x80000000):
+                      data_entry = root + (lang_entry & 0x7fffffff)
+                  else:
+                      lang_dir = root + (lang_entry & 0x7fffffff)
+                      _, lang_count = struct.unpack_from("<HH", data, lang_dir + 12)
+                      if lang_count == 0:
+                          return None
+                      _, leaf = struct.unpack_from("<II", data, lang_dir + 16)
+                      if leaf & 0x80000000:
+                          return None
+                      data_entry = root + leaf
+                  payload_rva, payload_size = struct.unpack_from("<II", data, data_entry)
+                  payload_offset = offset_for_rva(payload_rva)
+                  return data[payload_offset:payload_offset + payload_size]
+
+              return data, machine, resource
 
           files = {
               "x86 app": ("build-x86/Release/ReplayHUD.exe", 0x14c),
@@ -80,24 +138,27 @@ jobs:
               "x64 hook": ("build/Release/ReplayHUDHook.dll", 0x8664),
               "x64 D3D8 proxy": ("build/d3d8-proxy/Release/d3d8.dll", 0x8664),
           }
-          blobs = {}
+          binaries = {}
           for name, (path, expected) in files.items():
-              blob, machine = read_pe(path)
+              blob, machine, get_resource = read_pe(path)
               if machine != expected:
                   raise SystemExit(f"FAIL {name}: machine 0x{machine:04x}, expected 0x{expected:04x}")
-              blobs[name] = blob
+              binaries[name] = (blob, get_resource)
               print(f"PASS {name}: valid PE, machine 0x{machine:04x}")
 
           checks = [
-              ("x64 app contains x64 hook", "x64 app", "x64 hook"),
-              ("x64 app contains x86 hook", "x64 app", "x86 hook"),
-              ("x64 app contains x86 injector", "x64 app", "x86 injector"),
-              ("x64 D3D8 proxy contains x64 hook", "x64 D3D8 proxy", "x64 hook"),
-              ("x86 D3D8 proxy contains x86 hook", "x86 D3D8 proxy", "x86 hook"),
+              ("x64 app resource 201 embeds x64 hook", "x64 app", 201, "x64 hook"),
+              ("x64 app resource 202 embeds x86 hook", "x64 app", 202, "x86 hook"),
+              ("x64 app resource 203 embeds x86 injector", "x64 app", 203, "x86 injector"),
+              ("x64 D3D8 resource 204 embeds x64 hook", "x64 D3D8 proxy", 204, "x64 hook"),
+              ("x86 D3D8 resource 204 embeds x86 hook", "x86 D3D8 proxy", 204, "x86 hook"),
           ]
-          for label, parent, payload in checks:
-              if blobs[payload] not in blobs[parent]:
-                  raise SystemExit(f"FAIL {label}")
+          for label, parent, resource_id, payload_name in checks:
+              embedded = binaries[parent][1](resource_id)
+              if embedded is None:
+                  raise SystemExit(f"FAIL {label}: resource ID {resource_id} missing")
+              if embedded != binaries[payload_name][0]:
+                  raise SystemExit(f"FAIL {label}: resource contents differ from built payload")
               print(f"PASS {label}")
 
           print(f"Verified {len(files)} PE binaries and {len(checks)} embedded payloads.")
