@@ -161,9 +161,12 @@ jobs:
           curl.exe -fsSL --retry 3 -o vulkansdk.exe "https://sdk.lunarg.com/sdk/download/$vulkanVersion/windows/vulkansdk-windows-X64-$vulkanVersion.exe"
           $installer = Start-Process -Wait -PassThru -NoNewWindow -FilePath .\vulkansdk.exe -ArgumentList "--root", "C:\VulkanSDK", "--accept-licenses", "--default-answer", "--confirm-command", "install"
           if ($installer.ExitCode -ne 0) { throw "Vulkan SDK installer exit code $($installer.ExitCode)" }
+          $manifest = Get-ChildItem -Path "C:\VulkanSDK" -Recurse -Filter "VkLayer_khronos_validation.json" |
+            Select-Object -First 1
+          if (!$manifest) { throw "Khronos Vulkan validation layer manifest was not installed." }
           $key = "HKLM:\SOFTWARE\Khronos\Vulkan\ExplicitLayers"
           New-Item -Path $key -Force | Out-Null
-          New-ItemProperty -Path $key -Name "C:\VulkanSDK\Bin\VkLayer_khronos_validation.json" -Value 0 -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path $key -Name $manifest.FullName -Value 0 -PropertyType DWord -Force | Out-Null
 
       - name: Test Vulkan with validation layer
         shell: bash
