@@ -1,6 +1,8 @@
 name: Build and Release
 
 on:
+  pull_request:
+    branches: [main]
   push:
     tags:
       - "v*"
@@ -46,6 +48,7 @@ jobs:
           name: ReplayHUD-Windows-x64
           path: |
             release/ReplayHUD.exe
+            release/ReplayHUDHook.dll
             ReplayHUD-Windows-x64.zip
           if-no-files-found: error
 
