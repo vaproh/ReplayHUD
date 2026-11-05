@@ -10,6 +10,7 @@
 #include <d2d1helper.h>
 #include <dwrite.h>
 #include <dxgi.h>
+#include <dxgi1_2.h>
 
 #include <algorithm>
 #include <cwchar>
@@ -36,12 +37,15 @@ void SafeRelease(T*& value) {
     }
 }
 
-using PresentFn = HRESULT(__stdcall*)(IDXGISwapChain*, UINT, UINT);
-using ResizeBuffersFn = HRESULT(__stdcall*)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
+using PresentFn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT);
+using Present1Fn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain1*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
+using ResizeBuffersFn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
 
 PresentFn g_originalPresent = nullptr;
+Present1Fn g_originalPresent1 = nullptr;
 ResizeBuffersFn g_originalResizeBuffers = nullptr;
 std::mutex g_renderMutex;
+thread_local bool g_insidePresentHook = false;
 
 void LogHook(const wchar_t* message) {
     OutputDebugStringW(message);
@@ -247,14 +251,33 @@ void DrawOverlay(IDXGISwapChain* swapChain) {
     }
 }
 
-HRESULT __stdcall HookedPresent(IDXGISwapChain* swapChain, UINT syncInterval, UINT flags) {
-    if ((flags & DXGI_PRESENT_TEST) == 0) {
+HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* swapChain, UINT syncInterval, UINT flags) {
+    if (!g_insidePresentHook && (flags & DXGI_PRESENT_TEST) == 0) {
         std::lock_guard<std::mutex> lock(g_renderMutex);
         DrawOverlay(swapChain);
     }
-    return g_originalPresent
+    const bool wasInside = g_insidePresentHook;
+    g_insidePresentHook = true;
+    const HRESULT result = g_originalPresent
         ? g_originalPresent(swapChain, syncInterval, flags)
         : E_FAIL;
+    g_insidePresentHook = wasInside;
+    return result;
+}
+
+HRESULT STDMETHODCALLTYPE HookedPresent1(IDXGISwapChain1* swapChain, UINT syncInterval,
+    UINT flags, const DXGI_PRESENT_PARAMETERS* parameters) {
+    if (!g_insidePresentHook && (flags & DXGI_PRESENT_TEST) == 0) {
+        std::lock_guard<std::mutex> lock(g_renderMutex);
+        DrawOverlay(swapChain);
+    }
+    const bool wasInside = g_insidePresentHook;
+    g_insidePresentHook = true;
+    const HRESULT result = g_originalPresent1
+        ? g_originalPresent1(swapChain, syncInterval, flags, parameters)
+        : E_FAIL;
+    g_insidePresentHook = wasInside;
+    return result;
 }
 
 HRESULT __stdcall HookedResizeBuffers(IDXGISwapChain* swapChain, UINT bufferCount,
@@ -332,6 +355,19 @@ bool InstallPresentHook() {
     void* presentTarget = vtable[8];
     void* resizeTarget = vtable[13];
 
+    IDXGISwapChain1* swapChain1 = nullptr;
+    HRESULT querySwapChain1 = swapChain->QueryInterface(
+        __uuidof(IDXGISwapChain1), reinterpret_cast<void**>(&swapChain1));
+    if (FAILED(querySwapChain1) || !swapChain1) {
+        LogHook(L"IDXGISwapChain1 is unavailable; Present1 cannot be intercepted.");
+        SafeRelease(context);
+        SafeRelease(device);
+        SafeRelease(swapChain);
+        return false;
+    }
+    void** vtable1 = *reinterpret_cast<void***>(swapChain1);
+    void* present1Target = vtable1[22];
+
     mhStatus = MH_CreateHook(presentTarget, &HookedPresent,
         reinterpret_cast<LPVOID*>(&g_originalPresent));
     if (mhStatus != MH_OK) {
@@ -342,11 +378,25 @@ bool InstallPresentHook() {
         return false;
     }
 
+    mhStatus = MH_CreateHook(present1Target, &HookedPresent1,
+        reinterpret_cast<LPVOID*>(&g_originalPresent1));
+    if (mhStatus != MH_OK) {
+        MH_RemoveHook(presentTarget);
+        LogHook(L"MinHook could not create the IDXGISwapChain1::Present1 hook.");
+        SafeRelease(swapChain1);
+        SafeRelease(context);
+        SafeRelease(device);
+        SafeRelease(swapChain);
+        return false;
+    }
+
     mhStatus = MH_CreateHook(resizeTarget, &HookedResizeBuffers,
         reinterpret_cast<LPVOID*>(&g_originalResizeBuffers));
     if (mhStatus != MH_OK) {
         MH_RemoveHook(presentTarget);
+        MH_RemoveHook(present1Target);
         LogHook(L"MinHook could not create the IDXGISwapChain::ResizeBuffers hook.");
+        SafeRelease(swapChain1);
         SafeRelease(context);
         SafeRelease(device);
         SafeRelease(swapChain);
@@ -354,25 +404,28 @@ bool InstallPresentHook() {
     }
 
     mhStatus = MH_EnableHook(presentTarget);
-    if (mhStatus == MH_OK) {
-        mhStatus = MH_EnableHook(resizeTarget);
-    }
+    if (mhStatus == MH_OK) mhStatus = MH_EnableHook(present1Target);
+    if (mhStatus == MH_OK) mhStatus = MH_EnableHook(resizeTarget);
+    SafeRelease(swapChain1);
     SafeRelease(context);
     SafeRelease(device);
     SafeRelease(swapChain);
 
     if (mhStatus != MH_OK) {
         MH_DisableHook(presentTarget);
+        MH_DisableHook(present1Target);
         MH_DisableHook(resizeTarget);
         MH_RemoveHook(presentTarget);
+        MH_RemoveHook(present1Target);
         MH_RemoveHook(resizeTarget);
         LogHook(L"MinHook could not enable the DXGI hooks.");
         g_originalPresent = nullptr;
+        g_originalPresent1 = nullptr;
         g_originalResizeBuffers = nullptr;
         return false;
     }
 
-    LogHook(L"D3D11 Present and ResizeBuffers hooks installed successfully.");
+    LogHook(L"D3D11 Present, Present1 and ResizeBuffers hooks installed successfully.");
     return true;
 }
 
