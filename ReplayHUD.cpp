@@ -70,6 +70,7 @@ constexpr int kMenuExit = 2005;
 
 constexpr int IDC_PORT = 3001;
 constexpr int IDC_PASSWORD = 3002;
+constexpr int IDC_SOUND = 3004;
 constexpr int IDC_SHOW_PASSWORD = 3003;
 constexpr int IDC_DURATION = 3005;
 constexpr int IDC_MARGIN = 3006;
@@ -90,6 +91,7 @@ constexpr COLORREF kGreen = RGB(118, 185, 0);
 struct Settings {
     INTERNET_PORT port = 4455;
     std::wstring password;
+    bool sound = true;
     UINT durationMs = 2400;
     int marginPx = 24;
     int position = 0; // 0 TR, 1 TL, 2 BR, 3 BL
@@ -694,6 +696,7 @@ void EnsureDefaultConfig() {
         "password_dpapi=\r\n"
         "\r\n"
         "[HUD]\r\n"
+        "sound=1\r\n"
         "duration_ms=2400\r\n"
         "margin_px=24\r\n"
         "position=0\r\n";
@@ -735,6 +738,7 @@ void LoadSettings() {
         }
     }
 
+    loaded.sound = GetPrivateProfileIntW(L"HUD", L"sound", 1, g_configPath.c_str()) != 0;
     loaded.durationMs = std::clamp<UINT>(
         GetPrivateProfileIntW(L"HUD", L"duration_ms", 2400, g_configPath.c_str()),
         800u, 10000u);
@@ -773,6 +777,7 @@ bool SaveSettings(const Settings& settings) {
         write(L"OBS", L"port", std::to_wstring(settings.port)) &&
         write(L"OBS", L"password_dpapi", encrypted) &&
         write(L"OBS", L"password", L"") &&
+        write(L"HUD", L"sound", settings.sound ? L"1" : L"0") &&
         write(L"HUD", L"duration_ms", std::to_wstring(settings.durationMs)) &&
         write(L"HUD", L"margin_px", std::to_wstring(settings.marginPx)) &&
         write(L"HUD", L"position", std::to_wstring(settings.position));
@@ -1445,6 +1450,11 @@ void ShowNotification(const std::wstring& path, bool test,
     }
 
 
+    if (!customTitle.empty() || (!test && !path.empty())) {
+        if (settings.sound && !PlaySoundW(L"SystemNotification", nullptr, SND_ALIAS | SND_ASYNC | SND_NODEFAULT))
+            MessageBeep(MB_OK);
+    }
+
     HANDLE readyEvent = CreateEventW(nullptr, TRUE, FALSE, replayhud::kOverlayReadyEventName);
     if (readyEvent) ResetEvent(readyEvent);
     PublishOverlayPayload(g_toastTitle, g_toastSubtitle, settings.durationMs, settings.position, settings.marginPx);
@@ -1691,6 +1701,7 @@ void PopulateSettingsControls(HWND hwnd) {
     Settings s = SnapshotSettings();
     SetControlText(hwnd, IDC_PORT, std::to_wstring(s.port));
     SetControlText(hwnd, IDC_PASSWORD, s.password);
+    SendDlgItemMessageW(hwnd, IDC_SOUND, BM_SETCHECK, s.sound ? BST_CHECKED : BST_UNCHECKED, 0);
     SetControlText(hwnd, IDC_DURATION, std::to_wstring(s.durationMs));
     SetControlText(hwnd, IDC_MARGIN, std::to_wstring(s.marginPx));
     SendDlgItemMessageW(hwnd, IDC_POSITION, CB_SETCURSEL, s.position, 0);
@@ -1722,6 +1733,8 @@ void CreateSettingsControls(HWND hwnd) {
 
     CreateUiControl(hwnd, L"STATIC", L"NOTIFICATION", SS_LEFT,
         0, left, 226, 430, 20);
+    CreateUiControl(hwnd, L"BUTTON", L"Play sound when a clip is saved", BS_AUTOCHECKBOX,
+        IDC_SOUND, left, 255, 250, 25);
     CreateUiControl(hwnd, L"STATIC", L"Duration (ms)", SS_LEFT,
         0, left, 291, 130, 24);
     CreateUiControl(hwnd, L"EDIT", L"2400", ES_AUTOHSCROLL | ES_NUMBER,
@@ -1786,6 +1799,7 @@ bool SaveSettingsFromWindow(HWND hwnd) {
     Settings s;
     s.port = static_cast<INTERNET_PORT>(port);
     s.password = GetControlText(hwnd, IDC_PASSWORD);
+    s.sound = SendDlgItemMessageW(hwnd, IDC_SOUND, BM_GETCHECK, 0, 0) == BST_CHECKED;
     s.durationMs = static_cast<UINT>(duration);
     s.marginPx = static_cast<int>(margin);
     LRESULT position = SendDlgItemMessageW(hwnd, IDC_POSITION, CB_GETCURSEL, 0, 0);
