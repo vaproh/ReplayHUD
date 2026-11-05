@@ -5,6 +5,7 @@
 #define _WIN32_WINNT 0x0A00
 
 #include <windows.h>
+#include <tlhelp32.h>
 #include <windowsx.h>
 #include <winhttp.h>
 #include <bcrypt.h>
@@ -276,6 +277,25 @@ bool InjectHookIntoProcess(DWORD processId, const std::wstring& hookDllPath) {
     return completed && remoteResult != 0;
 }
 
+bool IsReplayHUDHookLoaded(DWORD processId) {
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, processId);
+    if (snapshot == INVALID_HANDLE_VALUE) return false;
+
+    MODULEENTRY32W module{};
+    module.dwSize = sizeof(module);
+    bool found = false;
+    if (Module32FirstW(snapshot, &module)) {
+        do {
+            if (_wcsicmp(module.szModule, L"ReplayHUDHook.dll") == 0) {
+                found = true;
+                break;
+            }
+        } while (Module32NextW(snapshot, &module));
+    }
+    CloseHandle(snapshot);
+    return found;
+}
+
 void EnsureForegroundHookInjected() {
     std::wstring hookDllPath = GetHookDllPath();
     if (hookDllPath.empty()) return;
@@ -287,6 +307,14 @@ void EnsureForegroundHookInjected() {
     DWORD processId = 0;
     GetWindowThreadProcessId(foreground, &processId);
     if (!processId || processId == GetCurrentProcessId()) return;
+
+    // The optional D3D8 proxy can load the hook itself. Avoid loading a second
+    // copy from ReplayHUD's install directory into the same game process.
+    if (IsReplayHUDHookLoaded(processId)) {
+        std::lock_guard<std::mutex> lock(g_injectedProcessesMutex);
+        g_injectedProcesses[processId] = true;
+        return;
+    }
 
     {
         std::lock_guard<std::mutex> lock(g_injectedProcessesMutex);
