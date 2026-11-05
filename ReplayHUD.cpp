@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <cstdlib>
 #include <cwchar>
 #include <iterator>
@@ -378,7 +379,7 @@ bool InjectHookIntoProcess(DWORD processId, const std::wstring& hookDllPath) {
         startup.cb = sizeof(startup);
         PROCESS_INFORMATION child{};
         if (!CreateProcessW(helperPath.c_str(), command.data(), nullptr, nullptr, FALSE,
-                CREATE_NO_WINDOW, nullptr, g_x86RuntimeDirectory.c_str(), &startup, &child))
+                CREATE_NO_WINDOW, nullptr, g_x86RuntimeDirectory.c_str(), &startup, &child)) {
             Log(L"Failed to start the 32-bit ReplayHUD injection helper.");
             return false;
         }
