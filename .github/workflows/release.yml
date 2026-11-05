@@ -123,8 +123,9 @@ jobs:
           UIH_TEST_FULLSCREEN: 1
         run: |
           set -o pipefail
-          ctest --test-dir build -C Release --output-on-failure --timeout 120 | tee ctest.log
+          ctest --test-dir build/_deps/universal_imgui_hook-build -C Release --output-on-failure --timeout 120 | tee ctest.log
           # DirectInput cannot observe synthetic key presses on hosted runners.
+          grep -q "tests passed" ctest.log || { echo "CTest did not execute any tests."; exit 1; }
           if grep Skipped ctest.log | grep -v input_directinput; then exit 1; fi
 
       # Exercise OpenGL through Mesa's D3D12-based driver as well as llvmpipe.
@@ -134,7 +135,8 @@ jobs:
           GALLIUM_DRIVER: d3d12
         run: |
           set -o pipefail
-          ctest --test-dir build -C Release --output-on-failure --timeout 120 -R opengl | tee ctest-d3d12.log
+          ctest --test-dir build/_deps/universal_imgui_hook-build -C Release --output-on-failure --timeout 120 -R opengl | tee ctest-d3d12.log
+          grep -q "tests passed" ctest-d3d12.log || { echo "OpenGL D3D12 CTest did not execute."; exit 1; }
           if grep Skipped ctest-d3d12.log; then exit 1; fi
 
       - name: Install Direct3D debug layers
@@ -146,8 +148,9 @@ jobs:
         env:
           UIH_TEST_D3D_DEBUG: 1
         run: |
-          ctest --test-dir build -C Release -V -R "d3d1[012]" -E fullscreen --timeout 120 > ctest-debug.log 2>&1 || true
+          ctest --test-dir build/_deps/universal_imgui_hook-build -C Release -V -R "d3d1[012]" -E fullscreen --timeout 120 > ctest-debug.log 2>&1
           grep -E "Test +#|DEBUG LAYER ERROR|tests passed" ctest-debug.log
+          grep -q "tests passed" ctest-debug.log || { echo "Direct3D debug-layer CTest did not execute."; exit 1; }
           if grep -qE "Skipped|Failed|DEBUG LAYER ERROR" ctest-debug.log; then exit 1; fi
 
       - name: Install Vulkan validation layer
@@ -167,8 +170,9 @@ jobs:
         env:
           UIH_TEST_VULKAN_VALIDATION: 1
         run: |
-          ctest --test-dir build -C Release -V -R vulkan --timeout 120 > ctest-validation.log 2>&1 || true
+          ctest --test-dir build/_deps/universal_imgui_hook-build -C Release -V -R vulkan --timeout 120 > ctest-validation.log 2>&1
           grep -E "Test +#|VALIDATION ERROR|tests passed" ctest-validation.log
+          grep -q "tests passed" ctest-validation.log || { echo "Vulkan validation CTest did not execute."; exit 1; }
           if grep -qE "Skipped|Failed|VALIDATION ERROR" ctest-validation.log; then exit 1; fi
 
       - name: Package release
