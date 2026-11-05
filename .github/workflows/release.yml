@@ -52,16 +52,28 @@ jobs:
           7z x mesa.7z -omesa | Out-Null
           curl.exe -fsSL --retry 3 -o vulkan.zip "https://sdk.lunarg.com/sdk/download/$vulkanVersion/windows/vulkan-runtime-components.zip"
           Expand-Archive vulkan.zip vulkan
-          $tests = "build/tests/Release"
-          Copy-Item mesa/x64/opengl32.dll, mesa/x64/libgallium_wgl.dll, mesa/x64/dxil.dll $tests
-          $loader = (Get-ChildItem vulkan -Recurse -Filter vulkan-1.dll | Where-Object { $_.Directory.Name -eq "x64" } | Select-Object -First 1).FullName
-          if (!$loader) { throw "64-bit Vulkan loader was not found in the runtime package." }
-          Copy-Item $loader $tests
-          $icd = (Get-ChildItem mesa/x64 -Filter "lvp_icd.*.json" | Select-Object -First 1).FullName
-          if (!$icd) { throw "Lavapipe ICD manifest was not found in the Mesa package." }
-          $registry = "HKLM:\SOFTWARE\Khronos\Vulkan\Drivers"
-          New-Item -Path $registry -Force | Out-Null
-          New-ItemProperty -Path $registry -Name $icd -Value 0 -PropertyType DWord -Force | Out-Null
+          $tests64 = "build/tests/Release"
+          $tests32 = "build-x86/tests/Release"
+          Copy-Item mesa/x64/opengl32.dll, mesa/x64/libgallium_wgl.dll, mesa/x64/dxil.dll $tests64
+          Copy-Item mesa/x86/opengl32.dll, mesa/x86/libgallium_wgl.dll, mesa/x86/dxil.dll $tests32
+          $loader64 = (Get-ChildItem vulkan -Recurse -Filter vulkan-1.dll | Where-Object { $_.Directory.Name -eq "x64" } | Select-Object -First 1).FullName
+          $loader32 = (Get-ChildItem vulkan -Recurse -Filter vulkan-1.dll | Where-Object { $_.Directory.Name -eq "x86" } | Select-Object -First 1).FullName
+          if (!$loader64 -or !$loader32) { throw "Both x64 and x86 Vulkan loaders are required." }
+          Copy-Item $loader64 $tests64
+          Copy-Item $loader32 $tests32
+          $icd64 = (Get-ChildItem mesa/x64 -Filter "lvp_icd.*.json" | Select-Object -First 1).FullName
+          $icd32 = (Get-ChildItem mesa/x86 -Filter "lvp_icd.*.json" | Select-Object -First 1).FullName
+          if (!$icd64 -or !$icd32) { throw "Both x64 and x86 Lavapipe manifests are required." }
+          $registry64 = "HKLM:\SOFTWARE\Khronos\Vulkan\Drivers"
+          New-Item -Path $registry64 -Force | Out-Null
+          New-ItemProperty -Path $registry64 -Name $icd64 -Value 0 -PropertyType DWord -Force | Out-Null
+          $registry32 = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+            [Microsoft.Win32.RegistryHive]::LocalMachine,
+            [Microsoft.Win32.RegistryView]::Registry32)
+          $drivers32 = $registry32.CreateSubKey("SOFTWARE\Khronos\Vulkan\Drivers")
+          $drivers32.SetValue($icd32, 0, [Microsoft.Win32.RegistryValueKind]::DWord)
+          $drivers32.Dispose()
+          $registry32.Dispose()
 
       - name: Test Vulkan and OpenGL backends
         shell: pwsh
@@ -73,6 +85,24 @@ jobs:
             Write-Host "Testing $api backend with Mesa software rendering"
             & $hostExe --api $api --capture
             if ($LASTEXITCODE -ne 0) { throw "$api backend test failed with exit code $LASTEXITCODE" }
+          }
+
+      - name: Test Win32 graphics backends
+        shell: pwsh
+        env:
+          GALLIUM_DRIVER: llvmpipe
+        run: |
+          $ErrorActionPreference = "Stop"
+          $hostExe = "build-x86/tests/Release/uih_host.exe"
+          & $hostExe --api d3d9 --capture
+          if ($LASTEXITCODE -ne 0) { throw "Win32 D3D9 backend test failed." }
+          foreach ($api in @("d3d10", "d3d11", "d3d12")) {
+            & $hostExe --api $api --warp --capture
+            if ($LASTEXITCODE -ne 0) { throw "Win32 $api backend test failed." }
+          }
+          foreach ($api in @("opengl", "vulkan")) {
+            & $hostExe --api $api --capture
+            if ($LASTEXITCODE -ne 0) { throw "Win32 $api backend test failed." }
           }
 
       - name: Run graphics lifecycle and renderer regression suite
