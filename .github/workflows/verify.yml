@@ -1,4 +1,4 @@
-name: Fast Verification
+name: Verify Windows Build
 
 on:
   push:
@@ -28,10 +28,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: Verify bundled-resource wiring
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
+  build-and-verify:
+    name: Build both architectures and verify embedded payloads
+    runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,46 +39,66 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Check resource IDs and CMake wiring
+      - name: Configure x86
+        run: cmake -S . -B build-x86 -A Win32 -DREPLAYHUD_BUILD_BACKEND_TESTS=OFF
+
+      - name: Build x86 components
+        run: cmake --build build-x86 --config Release --target ReplayHUD ReplayHUDHook d3d8to9 ReplayHUDInjector32 --parallel
+
+      - name: Configure x64
+        shell: pwsh
         run: |
-          python3 - <<'PY'
+          cmake -S . -B build -A x64 -DREPLAYHUD_BUILD_BACKEND_TESTS=OFF "-DREPLAYHUD_X86_HOOK=$PWD/build-x86/Release/ReplayHUDHook.dll" "-DREPLAYHUD_X86_INJECTOR=$PWD/build-x86/Release/ReplayHUDInjector32.exe"
+
+      - name: Build x64 components
+        run: cmake --build build --config Release --parallel
+
+      - name: Verify architectures and embedded runtime payloads
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          @'
           from pathlib import Path
-          import re
-          import sys
+          import struct
 
-          root = Path(".")
-          cmake = (root / "CMakeLists.txt").read_text()
-          ids = (root / "resource.h").read_text()
-          d3d8 = (root / "cmake/GenerateD3D8Resources.cmake").read_text()
-          app = (root / "cmake/GenerateAppResources.cmake").read_text()
-          workflow = (root / ".github/workflows/release.yml").read_text()
+          def read_pe(path):
+              data = Path(path).read_bytes()
+              if data[:2] != b"MZ":
+                  raise SystemExit(f"{path}: missing DOS header")
+              pe = struct.unpack_from("<I", data, 0x3c)[0]
+              if data[pe:pe+4] != b"PE\0\0":
+                  raise SystemExit(f"{path}: missing PE signature")
+              machine = struct.unpack_from("<H", data, pe + 4)[0]
+              return data, machine
 
-          required_ids = [
-              "IDR_D3D8_REPLAYHUD_HOOK",
-              "IDR_REPLAYHUD_HOOK_X64",
-              "IDR_REPLAYHUD_HOOK_X86",
-              "IDR_REPLAYHUD_INJECTOR_X86",
-          ]
-          for symbol in required_ids:
-              if symbol not in ids:
-                  sys.exit(f"Missing resource ID: {symbol}")
-
-          checks = {
-              "D3D8 resource generator embeds hook": "IDR_D3D8_REPLAYHUD_HOOK RCDATA" in d3d8,
-              "app resource generator embeds x64 hook": "IDR_REPLAYHUD_HOOK_X64 RCDATA" in app,
-              "app resource generator embeds x86 hook": "IDR_REPLAYHUD_HOOK_X86 RCDATA" in app,
-              "app resource generator embeds x86 injector": "IDR_REPLAYHUD_INJECTOR_X86 RCDATA" in app,
-              "generated D3D8 RC is registered as RC": 'GENERATED TRUE LANGUAGE RC' in cmake and "REPLAYHUD_D3D8_RESOURCES_RC" in cmake,
-              "generated app RC is registered as RC": cmake.count('GENERATED TRUE LANGUAGE RC') >= 2 and "REPLAYHUD_APP_RESOURCES_RC" in cmake,
-              "x86 components are built before x64 configure": workflow.index("Configure x86") < workflow.index("Build x86 hook") < workflow.index("Configure x64 app"),
-              "release packaging checks expected files": "Expected release file not found" in workflow,
-              "tag releases are gated on successful build": "needs: build" in workflow and "startsWith(github.ref, 'refs/tags/v')" in workflow,
+          files = {
+              "x86 app": ("build-x86/Release/ReplayHUD.exe", 0x14c),
+              "x86 hook": ("build-x86/Release/ReplayHUDHook.dll", 0x14c),
+              "x86 injector": ("build-x86/Release/ReplayHUDInjector32.exe", 0x14c),
+              "x86 D3D8 proxy": ("build-x86/d3d8-proxy/Release/d3d8.dll", 0x14c),
+              "x64 app": ("build/Release/ReplayHUD.exe", 0x8664),
+              "x64 hook": ("build/Release/ReplayHUDHook.dll", 0x8664),
+              "x64 D3D8 proxy": ("build/d3d8-proxy/Release/d3d8.dll", 0x8664),
           }
+          blobs = {}
+          for name, (path, expected) in files.items():
+              blob, machine = read_pe(path)
+              if machine != expected:
+                  raise SystemExit(f"FAIL {name}: machine 0x{machine:04x}, expected 0x{expected:04x}")
+              blobs[name] = blob
+              print(f"PASS {name}: valid PE, machine 0x{machine:04x}")
 
-          failed = [name for name, ok in checks.items() if not ok]
-          for name, ok in checks.items():
-              print(f"{'PASS' if ok else 'FAIL'} {name}")
-          if failed:
-              sys.exit(1)
-          print(f"Verified {len(checks)} source/config invariants.")
-          PY
+          checks = [
+              ("x64 app contains x64 hook", "x64 app", "x64 hook"),
+              ("x64 app contains x86 hook", "x64 app", "x86 hook"),
+              ("x64 app contains x86 injector", "x64 app", "x86 injector"),
+              ("x64 D3D8 proxy contains x64 hook", "x64 D3D8 proxy", "x64 hook"),
+              ("x86 D3D8 proxy contains x86 hook", "x86 D3D8 proxy", "x86 hook"),
+          ]
+          for label, parent, payload in checks:
+              if blobs[payload] not in blobs[parent]:
+                  raise SystemExit(f"FAIL {label}")
+              print(f"PASS {label}")
+
+          print(f"Verified {len(files)} PE binaries and {len(checks)} embedded payloads.")
+          '@ | python -
