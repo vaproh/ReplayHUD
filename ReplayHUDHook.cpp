@@ -196,6 +196,7 @@ DWORD WINAPI HookThreadProc(LPVOID) {
     config.backend = uih::Backend::None;
     config.menuKey = 0;
     config.unloadKey = 0;
+    config.menuButtons = 0;
     config.debugLog = true;
     config.render = DrawOverlay;
 
