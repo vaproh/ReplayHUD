@@ -184,9 +184,9 @@ void DrawOverlay() {
     draw->AddText(titlePosition, IM_COL32(240, 243, 247, 255), title.c_str());
     draw->AddText(subtitlePosition, IM_COL32(157, 166, 180, 255), subtitle.c_str());
     draw->PopClipRect();
+    SignalOverlayReady();
     if (!g_loggedFirstFrame.exchange(true, std::memory_order_relaxed))
         LogHook(L"First in-game notification frame rendered.");
-    SignalOverlayReady();
 }
 
 DWORD WINAPI HookThreadProc(LPVOID) {
