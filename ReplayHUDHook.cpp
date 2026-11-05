@@ -67,7 +67,7 @@ void LogHook(const wchar_t* message) {
 bool InitializeOverlayMapping() {
     if (g_overlayPayload) return true;
     const unsigned int attempt = g_mappingOpenAttempts.fetch_add(1, std::memory_order_relaxed);
-    if (attempt != 0 && attempt % 30 != 0) return false;
+    if (attempt != 0 && attempt % 10 != 0) return false;
     g_overlayMutex = OpenMutexW(SYNCHRONIZE | MUTEX_MODIFY_STATE, FALSE,
         replayhud::kOverlayMutexName);
     if (!g_overlayMutex) return false;
@@ -122,7 +122,7 @@ void SignalOverlayReady() {
     HANDLE event = g_overlayReadyEvent.load(std::memory_order_acquire);
     if (!event) {
         const unsigned int attempt = g_readyEventOpenAttempts.fetch_add(1, std::memory_order_relaxed);
-        if (attempt == 0 || attempt % 15 == 0) {
+        if (attempt == 0 || attempt % 5 == 0) {
             HANDLE opened = OpenEventW(EVENT_MODIFY_STATE, FALSE, replayhud::kOverlayReadyEventName);
             if (opened) {
                 HANDLE expected = nullptr;
