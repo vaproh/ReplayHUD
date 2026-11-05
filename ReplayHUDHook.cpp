@@ -34,9 +34,9 @@ ImFont* g_hintFont = nullptr;
 
 void SetupOverlayUi() {
     ImGuiIO& io = ImGui::GetIO();
-    g_titleFont = io.Fonts->AddFontFromFileTTF("C:\\\\Windows\\\\Fonts\\\\segoeuib.ttf", 17.0f);
-    g_bodyFont = io.Fonts->AddFontFromFileTTF("C:\\\\Windows\\\\Fonts\\\\segoeui.ttf", 16.0f);
-    g_hintFont = io.Fonts->AddFontFromFileTTF("C:\\\\Windows\\\\Fonts\\\\segoeui.ttf", 12.0f);
+    g_titleFont = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeuib.ttf", 17.0f);
+    g_bodyFont = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 16.0f);
+    g_hintFont = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 12.0f);
     if (!g_titleFont) g_titleFont = io.FontDefault;
     if (!g_bodyFont) g_bodyFont = io.FontDefault;
     if (!g_hintFont) g_hintFont = io.FontDefault;
