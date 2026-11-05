@@ -13,14 +13,14 @@ Notifications can appear on the desktop or, when a compatible game renderer is a
 ## Features
 
 - **Saved replay notifications** from OBS WebSocket v5 `ReplayBufferSaved` events.
-- **Replay Buffer status** notifications when the buffer starts or stops.
+- **Replay Buffer status** notifications when the buffer starts or stops, with duplicate state events suppressed.
 - **Click to open** the last saved replay in its default Windows application.
 - **System tray controls** for Settings, test notifications, the last replay, logs, and Exit.
 - **Configurable notifications** with position, duration, margin, and sound settings.
 - **OBS connection settings** for the local WebSocket port and optional password.
 - **Automatic reconnect** after connection settings change.
 - **Optional Windows startup** through a per-user startup entry.
-- **In-game notifications** through Direct3D 9/10/11/12, Vulkan, and OpenGL backends.
+- **In-game notifications** through Direct3D 9/10/11/12, Vulkan, and OpenGL backends, using a styled overlay with typography and visual hierarchy matched more closely to desktop notifications.
 - **Single-file app distribution.** The EXE contains the x64/x86 hook DLLs and 32-bit injection helper. It extracts them to the current user's Local AppData when launched.
 
 ## Requirements
@@ -115,7 +115,7 @@ ReplayHUD does not record, encode, move, rename, or edit video files. OBS remain
 
 The main application uses [Universal Dear ImGui Hook](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook) for supported graphics APIs. It detects the foreground process and selects the matching x64 or x86 runtime component. The 32-bit injector is bundled inside the EXE and is launched only when a 32-bit game needs it.
 
-The main application publishes notification data through shared memory. The hook renders that notification in a compatible foreground game. If the in-game renderer does not become ready, ReplayHUD keeps the desktop notification as a fallback.
+The main application publishes notification data through shared memory. The hook renders that notification in a compatible foreground game. In-game notifications use the same visual hierarchy as desktop notifications, including a colored accent, a distinct heading, readable message text, and a subdued footer. The overlay uses the same rendering path across supported backends, including OpenGL. If the in-game renderer does not become ready, ReplayHUD keeps the desktop notification as a fallback.
 
 ### Graphics API support
 
@@ -202,7 +202,7 @@ CMake fetches pinned revisions of Universal Dear ImGui Hook and `d3d8to9`. The p
 
 ## GitHub Actions and releases
 
-The workflow in [`.github/workflows/release.yml`](.github/workflows/release.yml) runs on pushes to `main`, tags matching `v*`, and manual dispatch. It builds x86 components first, then embeds them into the x64 application.
+The workflow in [`.github/workflows/release.yml`](.github/workflows/release.yml) runs on pushes to `main`, tags matching `v*`, and manual dispatch. It builds x86 components first, then embeds them into the x64 application. The separate [verification workflow](.github/workflows/verify.yml) builds both architectures and checks PE machine types plus the exact embedded hook and injector payloads in the application and D3D8 proxies.
 
 A tagged release publishes exactly these three assets:
 
@@ -233,7 +233,7 @@ See [all workflow runs](https://github.com/vaproh/ReplayHUD/actions) and [publis
 
 ## OBS WebSocket protocol
 
-ReplayHUD implements the OBS WebSocket v5 connection flow, including the `Hello` / `Identify` handshake and SHA-256 challenge-response authentication. It subscribes to output events and handles:
+ReplayHUD implements the OBS WebSocket v5 connection flow, including the `Hello` / `Identify` handshake and SHA-256 challenge-response authentication. It subscribes to output events and handles replay-buffer state notifications from both the dedicated start/stop events and `ReplayBufferStateChanged`. Equivalent state updates are deduplicated so one OBS state transition does not produce repeated notifications. It also handles:
 
 - `ReplayBufferSaved` — reads `eventData.savedReplayPath`.
 - `ReplayBufferStarted` — reports that the Replay Buffer started.
