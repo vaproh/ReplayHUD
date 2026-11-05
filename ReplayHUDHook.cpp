@@ -200,7 +200,7 @@ DWORD WINAPI HookThreadProc(LPVOID) {
     config.menuKey = 0;
     config.unloadKey = 0;
     config.menuButtons = 0;
-    config.debugLog = true;
+    config.debugLog = GetEnvironmentVariableW(L"REPLAYHUD_DEBUG", nullptr, 0) > 0;
     config.render = DrawOverlay;
 
     // Universal Dear ImGui Hook owns API detection, hook installation, device
