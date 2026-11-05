@@ -4,9 +4,9 @@
 
 namespace replayhud {
 
-constexpr wchar_t kOverlayMappingName[] = L"Local\\ReplayHUD.Overlay.v3";
-constexpr wchar_t kOverlayMutexName[] = L"Local\\ReplayHUD.Overlay.Mutex.v3";
-constexpr ULONG kOverlayPayloadVersion = 3;
+constexpr wchar_t kOverlayMappingName[] = L"Local\\ReplayHUD.Overlay.v4";
+constexpr wchar_t kOverlayMutexName[] = L"Local\\ReplayHUD.Overlay.Mutex.v4";
+constexpr ULONG kOverlayPayloadVersion = 4;
 constexpr size_t kOverlayTitleLength = 64;
 constexpr size_t kOverlaySubtitleLength = 256;
 
@@ -16,6 +16,8 @@ struct OverlayPayload {
     ULONG version = kOverlayPayloadVersion;
     ULONG active = 0;
     ULONGLONG expiresAtTick = 0;
+    LONG position = 0; // 0 TR, 1 TL, 2 BR, 3 BL
+    LONG marginPx = 24;
     WCHAR title[kOverlayTitleLength]{};
     WCHAR subtitle[kOverlaySubtitleLength]{};
 };
