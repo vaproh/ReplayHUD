@@ -49,7 +49,7 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Configure CMake
         run: cmake -S . -B build -A x64 -DREPLAYHUD_BUILD_BACKEND_TESTS=ON
@@ -234,7 +234,7 @@ jobs:
           Compress-Archive -Path "release/*" -DestinationPath "ReplayHUD-Windows.zip" -Force
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ReplayHUD-Windows
           path: |
@@ -272,13 +272,13 @@ jobs:
       contents: write
     steps:
       - name: Download tested package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ReplayHUD-Windows
           path: .
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ReplayHUD ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
