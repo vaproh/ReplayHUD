@@ -11,6 +11,26 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ReplayHUDBuildConfig.h"
 set(REPLAYHUD_X86_HOOK "" CACHE FILEPATH "Path to the x86 ReplayHUDHook.dll used by the x64 app")
 set(REPLAYHUD_X86_INJECTOR "" CACHE FILEPATH "Path to the x86 ReplayHUDInjector32.exe used by the x64 app")
 
+# Regenerate the build identifier whenever an embedded component changes.
+set(REPLAYHUD_CONFIGURE_DEPENDENCIES
+    "${CMAKE_CURRENT_SOURCE_DIR}/ReplayHUDHook.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ReplayHUDOverlayBridge.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ReplayHUDInjector32.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ReplayHUDD3D8Bootstrap.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/resource.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateAppResources.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateD3D8Resources.cmake"
+)
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    list(APPEND REPLAYHUD_CONFIGURE_DEPENDENCIES
+        "${REPLAYHUD_X86_HOOK}"
+        "${REPLAYHUD_X86_INJECTOR}"
+    )
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    ${REPLAYHUD_CONFIGURE_DEPENDENCIES}
+)
+
 if(NOT WIN32)
     message(FATAL_ERROR "ReplayHUD is a native Windows application and must be built on Windows.")
 endif()
