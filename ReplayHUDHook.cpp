@@ -177,8 +177,9 @@ void DrawOverlay() {
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     if (!draw || display.x <= 0.0f || display.y <= 0.0f) return;
 
-    constexpr float panelWidth = 440.0f;
-    constexpr float panelHeight = 110.0f;
+    // A compact, high-contrast toast designed to read cleanly over busy gameplay.
+    constexpr float panelWidth = 390.0f;
+    constexpr float panelHeight = 104.0f;
     const float margin = static_cast<float>((std::clamp)(payload.marginPx, 8L, 200L));
     const float width = (std::min)(panelWidth, (std::max)(1.0f, display.x - margin * 2.0f));
     const float height = (std::min)(panelHeight, (std::max)(1.0f, display.y - margin * 2.0f));
@@ -190,30 +191,60 @@ void DrawOverlay() {
     const ImVec2 min(left, top);
     const ImVec2 max(left + width, top + height);
 
-    // Draw the outline as a filled ring instead of a 1 px stroked path.
-    // A stroked rounded rect can show anti-aliased pinholes where corner
-    // segments meet on some render backends / fractional DPI scales.
-    constexpr float borderWidth = 1.5f;
-    const ImU32 borderColor = IM_COL32(75, 84, 99, 255);
-    const ImU32 panelColor = IM_COL32(20, 23, 29, 238);
-    draw->AddRectFilled(min, max, borderColor, 16.0f, ImDrawFlags_RoundCornersAll);
-    const ImVec2 innerMin(min.x + borderWidth, min.y + borderWidth);
-    const ImVec2 innerMax(max.x - borderWidth, max.y - borderWidth);
-    draw->AddRectFilled(innerMin, innerMax, panelColor, 16.0f - borderWidth,
-        ImDrawFlags_RoundCornersAll);
+    const bool isStopped = title.find("STOP") != std::string::npos;
+    const bool isBufferEvent = title.find("REPLAY BUFFER") != std::string::npos;
+    const ImU32 accent = isStopped ? IM_COL32(245, 166, 35, 255) : IM_COL32(132, 204, 22, 255);
+    const ImU32 muted = IM_COL32(151, 163, 180, 255);
 
-    // Match the desktop toast: green Segoe UI heading, clean body text, and a muted footer.
-    draw->AddRectFilled(ImVec2(left + 20.0f, top + 18.0f),
-        ImVec2(left + 23.0f, top + 91.0f), IM_COL32(118, 185, 0, 255), 1.5f);
-    const ImVec2 titlePosition(left + 34.0f, top + 15.0f);
-    const ImVec2 subtitlePosition(left + 34.0f, top + 43.0f);
-    const ImVec2 hintPosition(left + 34.0f, top + 78.0f);
-    draw->PushClipRect(ImVec2(left + 16.0f, top + 10.0f),
-        ImVec2(left + width - 16.0f, top + height - 10.0f), true);
-    draw->AddText(g_titleFont, 17.0f, titlePosition, IM_COL32(118, 185, 0, 255), title.c_str());
-    draw->AddText(g_bodyFont, 16.0f, subtitlePosition, IM_COL32(240, 243, 247, 255), subtitle.c_str());
-    draw->AddText(g_hintFont, 12.0f, hintPosition, IM_COL32(157, 166, 180, 255),
-        "ReplayHUD  \\xe2\\x80\\xa2  OBS Replay Buffer");
+    // Soft shadow, dark glass-like panel, subtle outline and top highlight.
+    for (int i = 5; i >= 1; --i) {
+        const float offset = static_cast<float>(i) * 1.4f;
+        draw->AddRectFilled(ImVec2(min.x, min.y + offset),
+            ImVec2(max.x, max.y + offset), IM_COL32(0, 0, 0, 12 + (5 - i) * 5),
+            13.0f, ImDrawFlags_RoundCornersAll);
+    }
+    draw->AddRectFilled(min, max, IM_COL32(68, 78, 92, 245), 13.0f,
+        ImDrawFlags_RoundCornersAll);
+    draw->AddRectFilled(ImVec2(left + 1.0f, top + 1.0f),
+        ImVec2(left + width - 1.0f, top + height - 1.0f),
+        IM_COL32(17, 21, 29, 248), 12.0f, ImDrawFlags_RoundCornersAll);
+    draw->AddRectFilled(ImVec2(left + 1.0f, top + 1.0f),
+        ImVec2(left + width - 1.0f, top + 3.0f), accent, 1.0f);
+
+    // Icon tile with a simple geometric replay glyph, no icon-font dependency.
+    const ImVec2 iconMin(left + 17.0f, top + 23.0f);
+    const ImVec2 iconMax(left + 61.0f, top + 67.0f);
+    draw->AddRectFilled(iconMin, iconMax, IM_COL32(39, 48, 58, 255), 11.0f,
+        ImDrawFlags_RoundCornersAll);
+    const ImVec2 center((iconMin.x + iconMax.x) * 0.5f, (iconMin.y + iconMax.y) * 0.5f);
+    if (isBufferEvent) {
+        if (isStopped) {
+            draw->AddRectFilled(ImVec2(center.x - 7.0f, center.y - 7.0f),
+                ImVec2(center.x - 1.0f, center.y + 7.0f), accent, 1.5f);
+            draw->AddRectFilled(ImVec2(center.x + 2.0f, center.y - 7.0f),
+                ImVec2(center.x + 8.0f, center.y + 7.0f), accent, 1.5f);
+        } else {
+            draw->AddCircle(center, 11.0f, accent, 0, 2.5f);
+            draw->AddTriangleFilled(ImVec2(center.x - 3.0f, center.y - 6.0f),
+                ImVec2(center.x - 3.0f, center.y + 6.0f),
+                ImVec2(center.x + 7.0f, center.y), accent);
+        }
+    } else {
+        draw->AddCircle(center, 11.0f, accent, 0, 2.5f);
+        draw->AddTriangleFilled(ImVec2(center.x - 3.0f, center.y - 6.0f),
+            ImVec2(center.x - 3.0f, center.y + 6.0f),
+            ImVec2(center.x + 7.0f, center.y), accent);
+    }
+
+    const float textLeft = left + 76.0f;
+    draw->PushClipRect(ImVec2(textLeft, top + 10.0f),
+        ImVec2(left + width - 15.0f, top + height - 9.0f), true);
+    draw->AddText(g_hintFont, 11.0f, ImVec2(textLeft, top + 14.0f),
+        muted, "REPLAYHUD  /  OBS");
+    draw->AddText(g_titleFont, 18.0f, ImVec2(textLeft, top + 31.0f),
+        IM_COL32(245, 247, 250, 255), title.c_str());
+    draw->AddText(g_bodyFont, 14.0f, ImVec2(textLeft, top + 62.0f),
+        IM_COL32(190, 199, 211, 255), subtitle.c_str());
     draw->PopClipRect();
 
     // The UIH render callback runs before ImGui::Render(). Wait until the
