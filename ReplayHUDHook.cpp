@@ -174,8 +174,17 @@ void DrawOverlay() {
     const ImVec2 min(left, top);
     const ImVec2 max(left + width, top + height);
 
-    draw->AddRectFilled(min, max, IM_COL32(20, 23, 29, 230), 16.0f);
-    draw->AddRect(min, max, IM_COL32(54, 61, 72, 255), 16.0f, 1.0f, ImDrawFlags_RoundCornersAll);
+    // Draw the outline as a filled ring instead of a 1 px stroked path.
+    // A stroked rounded rect can show anti-aliased pinholes where corner
+    // segments meet on some render backends / fractional DPI scales.
+    constexpr float borderWidth = 1.5f;
+    const ImU32 borderColor = IM_COL32(75, 84, 99, 255);
+    const ImU32 panelColor = IM_COL32(20, 23, 29, 238);
+    draw->AddRectFilled(min, max, borderColor, 16.0f, ImDrawFlags_RoundCornersAll);
+    const ImVec2 innerMin(min.x + borderWidth, min.y + borderWidth);
+    const ImVec2 innerMax(max.x - borderWidth, max.y - borderWidth);
+    draw->AddRectFilled(innerMin, innerMax, panelColor, 16.0f - borderWidth,
+        ImDrawFlags_RoundCornersAll);
 
     const ImVec2 titlePosition(left + 20.0f, top + 17.0f);
     const ImVec2 subtitlePosition(left + 20.0f, top + 57.0f);
