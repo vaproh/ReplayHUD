@@ -210,7 +210,7 @@ jobs:
             ReplayHUD-Windows.zip
           if-no-files-found: error
 
-      - name: Remove temporary branches and create v1.3.0 tag
+      - name: Remove temporary branches after successful main build
         if: github.ref == 'refs/heads/main'
         shell: pwsh
         env:
@@ -221,17 +221,14 @@ jobs:
             gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/git/refs/heads/$branch"
             if ($LASTEXITCODE -ne 0) { throw "Could not delete temporary branch: $branch" }
           }
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a v1.3.0 -m "ReplayHUD v1.3.0"
-          git push origin v1.3.0
-          if ($LASTEXITCODE -ne 0) { throw "Could not push release tag v1.3.0" }
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          name: ReplayHUD ${{ github.ref_name }}
+          name: ReplayHUD ${{ github.ref == 'refs/heads/main' && 'v1.3.0' || github.ref_name }}
+          tag_name: ${{ github.ref == 'refs/heads/main' && 'v1.3.0' || github.ref_name }}
+          target_commitish: main
           generate_release_notes: true
           files: |
             release/ReplayHUD.exe
