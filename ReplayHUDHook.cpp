@@ -123,7 +123,7 @@ void SignalOverlayReady() {
             if (opened) {
             HANDLE expected = nullptr;
             if (!g_overlayReadyEvent.compare_exchange_strong(expected, opened,
-                    std::memory_order_release, std::memory_order_acquire)) {
+                    std::memory_order_acq_rel, std::memory_order_acquire)) {
                 CloseHandle(opened);
             }
                 event = g_overlayReadyEvent.load(std::memory_order_acquire);
