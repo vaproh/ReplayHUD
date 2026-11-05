@@ -43,7 +43,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $hostExe = "build/tests/Release/uih_host.exe"
+          $hostExe = "build/_deps/universal_imgui_hook-build/tests/Release/uih_host.exe"
           Write-Host "Testing D3D9 using the hosted Direct3D device"
           & $hostExe --api d3d9 --capture
           if ($LASTEXITCODE -ne 0) { throw "D3D9 backend test failed with exit code $LASTEXITCODE" }
@@ -63,8 +63,8 @@ jobs:
           7z x mesa.7z -omesa | Out-Null
           curl.exe -fsSL --retry 3 -o vulkan.zip "https://sdk.lunarg.com/sdk/download/$vulkanVersion/windows/vulkan-runtime-components.zip"
           Expand-Archive vulkan.zip vulkan
-          $tests64 = "build/tests/Release"
-          $tests32 = "build-x86/tests/Release"
+          $tests64 = "build/_deps/universal_imgui_hook-build/tests/Release"
+          $tests32 = "build-x86/_deps/universal_imgui_hook-build/tests/Release"
           Copy-Item mesa/x64/opengl32.dll, mesa/x64/libgallium_wgl.dll, mesa/x64/dxil.dll $tests64
           Copy-Item mesa/x86/opengl32.dll, mesa/x86/libgallium_wgl.dll, mesa/x86/dxil.dll $tests32
           $loader64 = (Get-ChildItem vulkan -Recurse -Filter vulkan-1.dll | Where-Object { $_.Directory.Name -eq "x64" } | Select-Object -First 1).FullName
@@ -90,7 +90,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $hostExe = "build/tests/Release/uih_host.exe"
+          $hostExe = "build/_deps/universal_imgui_hook-build/tests/Release/uih_host.exe"
           $env:GALLIUM_DRIVER = "llvmpipe"
           foreach ($api in @("opengl", "vulkan")) {
             Write-Host "Testing $api backend with Mesa software rendering"
@@ -104,7 +104,7 @@ jobs:
           GALLIUM_DRIVER: llvmpipe
         run: |
           $ErrorActionPreference = "Stop"
-          $hostExe = "build-x86/tests/Release/uih_host.exe"
+          $hostExe = "build-x86/_deps/universal_imgui_hook-build/tests/Release/uih_host.exe"
           & $hostExe --api d3d9 --capture
           if ($LASTEXITCODE -ne 0) { throw "Win32 D3D9 backend test failed." }
           foreach ($api in @("d3d10", "d3d11", "d3d12")) {
