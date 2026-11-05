@@ -13,12 +13,11 @@ include(FetchContent)
 # Universal Dear ImGui Hook supplies the tested D3D9/10/11/12, Vulkan and
 # OpenGL render backends. Keep the dependency pinned; do not follow master.
 set(UIH_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
-set(UIH_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(UIH_BUILD_TESTS ON CACHE BOOL "" FORCE)
 set(UIH_STATIC_RUNTIME ON CACHE BOOL "" FORCE)
 FetchContent_Declare(universal_imgui_hook
     GIT_REPOSITORY https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook.git
-    GIT_TAG v2.0.0
-    GIT_SHALLOW TRUE
+    GIT_TAG 2364c2f24e06af2e03e9576d3d88f7c92b7ccc43
 )
 FetchContent_MakeAvailable(universal_imgui_hook)
 
