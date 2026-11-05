@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(ReplayHUD VERSION 1.3.0 LANGUAGES CXX)
+project(ReplayHUD VERSION 1.3.0 LANGUAGES CXX RC)
 
 # A per-configure identifier keeps runtime DLLs versioned. Games may keep an
 # older hook mapped after ReplayHUD exits, so new builds must never overwrite it.
@@ -35,7 +35,6 @@ if(NOT WIN32)
     message(FATAL_ERROR "ReplayHUD is a native Windows application and must be built on Windows.")
 endif()
 
-enable_language(RC)
 
 include(FetchContent)
 
