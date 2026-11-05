@@ -179,8 +179,11 @@ void DrawOverlay() {
 
     const ImVec2 titlePosition(left + 20.0f, top + 17.0f);
     const ImVec2 subtitlePosition(left + 20.0f, top + 57.0f);
+    draw->PushClipRect(ImVec2(left + 16.0f, top + 10.0f),
+        ImVec2(left + width - 16.0f, top + height - 10.0f), true);
     draw->AddText(titlePosition, IM_COL32(240, 243, 247, 255), title.c_str());
     draw->AddText(subtitlePosition, IM_COL32(157, 166, 180, 255), subtitle.c_str());
+    draw->PopClipRect();
     if (!g_loggedFirstFrame.exchange(true, std::memory_order_relaxed))
         LogHook(L"First in-game notification frame rendered.");
     SignalOverlayReady();
