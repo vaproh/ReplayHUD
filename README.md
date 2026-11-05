@@ -121,22 +121,26 @@ The build uses the static MSVC runtime (`/MT`). CMake fetches pinned revisions o
 
 ## Automated GitHub Releases
 
-The workflow at `.github/workflows/release.yml` builds and tests every pull request and branch update. After a successful build on `main`, it removes the temporary development branches, creates the `v1.3.0` tag, and publishes the GitHub Release.
+The workflow at `.github/workflows/release.yml` builds and tests pull requests, pushes to `main`, and version tags. A push to `main` runs validation and uploads a CI artifact; it does not create or overwrite a public release. Releases are published only from an explicit version tag after the tag's build and tests pass.
 
 ```bash
 git add .
 git commit -m "Prepare release"
 git push origin main
+
+# After reviewing the successful main-branch build:
+git tag -a vX.Y.Z -m "ReplayHUD vX.Y.Z"
+git push origin vX.Y.Z
 ```
 
-After the main-branch build passes, GitHub Actions:
+For each pull request, main-branch push, or version-tag push, GitHub Actions:
 
-1. Builds the x64 application and hook, plus x86 hook, helper injector, and D3D8 proxy.
-2. Runs x64 and x86 smoke tests: D3D9 on the hosted device, WARP for D3D10/11/12, and Mesa software drivers for Vulkan/OpenGL; the x64 build also runs the graphics lifecycle regression suite.
+1. Builds the x64 application and hook, plus the x86 hook, helper injector, and D3D8 proxy.
+2. Runs x64 and x86 graphics smoke tests: D3D9, WARP for D3D10/11/12, and Mesa software drivers for Vulkan/OpenGL. The x64 build also runs the graphics lifecycle regression suite, Direct3D debug-layer checks, and Vulkan validation-layer checks.
 3. Packages both architectures, the D3D8 compatibility proxy, and required third-party license notices into `ReplayHUD-Windows.zip`.
-4. Publishes the ZIP to a GitHub Release and generates release notes.
+4. Uploads the tested package as a workflow artifact. For a `v*` tag, a separate least-privilege release job publishes that exact tested artifact and generates release notes.
 
-A manual run from the Actions tab builds and uploads workflow artifacts but does not publish a GitHub Release. The workflow requests `contents: write`; repository Actions policy must allow release publishing.
+A manual run from the Actions tab builds and uploads workflow artifacts but does not publish a GitHub Release. The build job uses read-only repository permissions; only the tag-gated release job receives `contents: write`.
 
 ## In-game overlay API support
 
