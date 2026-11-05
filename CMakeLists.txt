@@ -16,6 +16,12 @@ FetchContent_Declare(minhook
 )
 FetchContent_MakeAvailable(minhook)
 
+if(MSVC)
+    set_property(TARGET minhook PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    )
+endif()
+
 # Embed the icon using an absolute path so RC resolves it consistently in
 # out-of-source and GitHub Actions builds.
 file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/assets/ReplayHUD.ico" REPLAYHUD_ICON_FILE)
