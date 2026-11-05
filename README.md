@@ -86,7 +86,7 @@ ReplayHUD does not record video, modify OBS scenes, or change Replay Buffer file
 ### Requirements
 
 - Visual Studio 2022 or Visual Studio 2022 Build Tools with **Desktop development with C++**.
-- CMake 3.20 or newer.
+- CMake 3.21 or newer.
 - Windows 10/11 SDK.
 
 ### Build
@@ -162,7 +162,9 @@ Important limits:
 - The D3D8 proxy is an API translation layer, not native D3D8 rendering. Some old titles behave differently under translation; d3d8to9 may also need the legacy DirectX End-User Runtime for D3DX shader helpers. Remove the local `d3d8.dll` to revert to the system D3D8 runtime.
 - HDR output, unusual swap-chain formats, overlays from other tools, and games with multiple render windows may still expose compatibility issues.
 - Exclusive-fullscreen visibility depends on the display mode, driver, and application. Borderless-fullscreen is the first configuration to validate.
-- Protected games and anti-cheat systems may block third-party overlays. ReplayHUD does not attempt to bypass those protections; use only titles where overlays are permitted.
+- ReplayHUD only attempts injection when the foreground process has a supported graphics runtime loaded. Common desktop apps/launchers and several known anti-cheat modules are excluded. This is a best-effort safety filter, not a complete anti-cheat detector.
+- Protected games and anti-cheat systems may still block third-party overlays. ReplayHUD does not attempt to bypass those protections; use only titles where overlays are permitted.
+- The desktop toast is suppressed only after the in-game renderer has drawn the notification. If no compatible renderer becomes ready, the desktop toast remains the fallback.
 - Hook diagnostics are written to `%LOCALAPPDATA%\\ReplayHUD\\ReplayHUDHook.log` in the target process.
 - If injection or hook initialization fails, ReplayHUD continues using the regular desktop toast behavior.
 
