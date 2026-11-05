@@ -133,16 +133,14 @@ ConnectionStatus g_status = ConnectionStatus::Connecting;
 HFONT g_uiFont = nullptr;
 HFONT g_uiBoldFont = nullptr;
 HANDLE g_overlayMapping = nullptr;
+HANDLE g_overlayMutex = nullptr;
 replayhud::OverlayPayload* g_overlayPayload = nullptr;
 
 void Log(const std::wstring& message);
 
 void PublishOverlayPayload(const std::wstring& title, const std::wstring& subtitle, UINT durationMs, int position, int marginPx) {
-    if (!g_overlayPayload) return;
-    HANDLE mutex = OpenMutexW(SYNCHRONIZE | MUTEX_MODIFY_STATE, FALSE,
-        replayhud::kOverlayMutexName);
-    if (!mutex) return;
-    const DWORD wait = WaitForSingleObject(mutex, 100);
+    if (!g_overlayPayload || !g_overlayMutex) return;
+    const DWORD wait = WaitForSingleObject(g_overlayMutex, 100);
     if (wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED) {
         g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
         g_overlayPayload->active = 1;
@@ -151,17 +149,13 @@ void PublishOverlayPayload(const std::wstring& title, const std::wstring& subtit
         g_overlayPayload->marginPx = std::clamp(marginPx, 8, 200);
         wcsncpy_s(g_overlayPayload->title, title.c_str(), _TRUNCATE);
         wcsncpy_s(g_overlayPayload->subtitle, subtitle.c_str(), _TRUNCATE);
-        ReleaseMutex(mutex);
+        ReleaseMutex(g_overlayMutex);
     }
-    CloseHandle(mutex);
 }
 
 void ClearOverlayPayload() {
-    if (!g_overlayPayload) return;
-    HANDLE mutex = OpenMutexW(SYNCHRONIZE | MUTEX_MODIFY_STATE, FALSE,
-        replayhud::kOverlayMutexName);
-    if (!mutex) return;
-    const DWORD wait = WaitForSingleObject(mutex, 100);
+    if (!g_overlayPayload || !g_overlayMutex) return;
+    const DWORD wait = WaitForSingleObject(g_overlayMutex, 100);
     if (wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED) {
         g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
         g_overlayPayload->active = 0;
@@ -170,29 +164,33 @@ void ClearOverlayPayload() {
         g_overlayPayload->marginPx = 24;
         g_overlayPayload->title[0] = L'\0';
         g_overlayPayload->subtitle[0] = L'\0';
-        ReleaseMutex(mutex);
+        ReleaseMutex(g_overlayMutex);
     }
-    CloseHandle(mutex);
 }
 
 bool InitializeOverlayBridge() {
-    HANDLE mutex = CreateMutexW(nullptr, FALSE, replayhud::kOverlayMutexName);
-    if (!mutex) return false;
+    g_overlayMutex = CreateMutexW(nullptr, FALSE, replayhud::kOverlayMutexName);
+    if (!g_overlayMutex) return false;
+
     g_overlayMapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
         static_cast<DWORD>(sizeof(replayhud::OverlayPayload)), replayhud::kOverlayMappingName);
     if (!g_overlayMapping) {
-        CloseHandle(mutex);
+        CloseHandle(g_overlayMutex);
+        g_overlayMutex = nullptr;
         return false;
     }
+
     g_overlayPayload = static_cast<replayhud::OverlayPayload*>(
         MapViewOfFile(g_overlayMapping, FILE_MAP_WRITE, 0, 0, sizeof(replayhud::OverlayPayload)));
     if (!g_overlayPayload) {
         CloseHandle(g_overlayMapping);
         g_overlayMapping = nullptr;
-        CloseHandle(mutex);
+        CloseHandle(g_overlayMutex);
+        g_overlayMutex = nullptr;
         return false;
     }
-    const DWORD wait = WaitForSingleObject(mutex, 100);
+
+    const DWORD wait = WaitForSingleObject(g_overlayMutex, 100);
     if (wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED) {
         g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
         g_overlayPayload->active = 0;
@@ -201,9 +199,8 @@ bool InitializeOverlayBridge() {
         g_overlayPayload->marginPx = 24;
         g_overlayPayload->title[0] = L'\0';
         g_overlayPayload->subtitle[0] = L'\0';
-        ReleaseMutex(mutex);
+        ReleaseMutex(g_overlayMutex);
     }
-    CloseHandle(mutex);
     return true;
 }
 
@@ -216,6 +213,10 @@ void ShutdownOverlayBridge() {
     if (g_overlayMapping) {
         CloseHandle(g_overlayMapping);
         g_overlayMapping = nullptr;
+    }
+    if (g_overlayMutex) {
+        CloseHandle(g_overlayMutex);
+        g_overlayMutex = nullptr;
     }
 }
 
