@@ -33,7 +33,10 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $hostExe = "build/tests/Release/uih_host.exe"
-          foreach ($api in @("d3d9", "d3d10", "d3d11", "d3d12")) {
+          Write-Host "Testing D3D9 using the hosted Direct3D device"
+          & $hostExe --api d3d9 --capture
+          if ($LASTEXITCODE -ne 0) { throw "D3D9 backend test failed with exit code $LASTEXITCODE" }
+          foreach ($api in @("d3d10", "d3d11", "d3d12")) {
             Write-Host "Testing $api with the Windows software rasterizer"
             & $hostExe --api $api --warp --capture
             if ($LASTEXITCODE -ne 0) { throw "$api backend test failed with exit code $LASTEXITCODE" }
