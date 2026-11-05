@@ -74,6 +74,8 @@ jobs:
 
       - name: Run graphics lifecycle and renderer regression suite
         shell: bash
+        env:
+          GALLIUM_DRIVER: llvmpipe
         run: |
           set -o pipefail
           ctest --test-dir build -C Release --output-on-failure --timeout 120 -E fullscreen | tee ctest.log
