@@ -46,10 +46,30 @@ void SetupOverlayUi() {
     const std::wstring semiboldFont = fontDirectory + L"segoeuisb.ttf";
     const std::wstring boldFont = fontDirectory + L"segoeuib.ttf";
 
-    ImFont* regular = io.Fonts->AddFontFromFileTTF(regularFont.c_str(), 16.0f);
-    ImFont* semibold = io.Fonts->AddFontFromFileTTF(semiboldFont.c_str(), 17.0f);
-    ImFont* bold = io.Fonts->AddFontFromFileTTF(boldFont.c_str(), 14.0f);
-    ImFont* hint = io.Fonts->AddFontFromFileTTF(regularFont.c_str(), 11.0f);
+    // ImGui's file loader accepts narrow paths. Convert using the active
+    // Windows code page so CreateFile/fopen can resolve the installed font.
+    auto toNarrowPath = [](const std::wstring& path) {
+        const int count = WideCharToMultiByte(CP_ACP, 0, path.c_str(), -1,
+            nullptr, 0, nullptr, nullptr);
+        if (count <= 0) return std::string{};
+        std::string result(static_cast<size_t>(count), '\0');
+        if (!WideCharToMultiByte(CP_ACP, 0, path.c_str(), -1,
+                result.data(), count, nullptr, nullptr)) return std::string{};
+        result.pop_back();
+        return result;
+    };
+    const std::string regularPath = toNarrowPath(regularFont);
+    const std::string semiboldPath = toNarrowPath(semiboldFont);
+    const std::string boldPath = toNarrowPath(boldFont);
+
+    ImFont* regular = regularPath.empty() ? nullptr :
+        io.Fonts->AddFontFromFileTTF(regularPath.c_str(), 16.0f);
+    ImFont* semibold = semiboldPath.empty() ? nullptr :
+        io.Fonts->AddFontFromFileTTF(semiboldPath.c_str(), 17.0f);
+    ImFont* bold = boldPath.empty() ? nullptr :
+        io.Fonts->AddFontFromFileTTF(boldPath.c_str(), 14.0f);
+    ImFont* hint = regularPath.empty() ? nullptr :
+        io.Fonts->AddFontFromFileTTF(regularPath.c_str(), 11.0f);
 
     g_titleFont = bold ? bold : (semibold ? semibold : io.FontDefault);
     g_bodyFont = semibold ? semibold : (regular ? regular : io.FontDefault);
