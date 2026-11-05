@@ -113,13 +113,15 @@ You can also build directly with CMake:
 ```bat
 cmake -S . -B build -A x64
 cmake --build build --config Release --parallel
+cmake -S . -B build-x86 -A Win32 -DREPLAYHUD_BUILD_BACKEND_TESTS=OFF
+cmake --build build-x86 --config Release --target ReplayHUDHook d3d8to9 ReplayHUDInjector32 --parallel
 ```
 
 The build uses the static MSVC runtime (`/MT`). CMake fetches pinned revisions of Universal Dear ImGui Hook and d3d8to9. The former provides the D3D9/10/11/12, Vulkan and OpenGL renderers; the latter translates D3D8 to D3D9. The x86 build supplies a 32-bit hook and helper injector for legacy 32-bit games. The application icon and Windows file-version metadata are embedded from `assets/ReplayHUD.ico` and `ReplayHUD.rc.in`.
 
 ## Automated GitHub Releases
 
-The workflow at `.github/workflows/release.yml` builds a Windows x64 executable whenever a tag matching `v*` is pushed.
+The workflow at `.github/workflows/release.yml` builds the x64 app plus x64/x86 graphics hooks and D3D8 proxies whenever a tag matching `v*` is pushed.
 
 ```bash
 git add .
