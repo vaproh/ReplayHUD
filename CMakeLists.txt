@@ -154,7 +154,9 @@ set_target_properties(ReplayHUDHook PROPERTIES OUTPUT_NAME "ReplayHUDHook")
 # D3D8 proxy is a standalone per-game DLL. Embed the architecture-matching
 # hook so users do not need to copy a second file beside the game executable.
 set(REPLAYHUD_D3D8_RESOURCES_RC "${CMAKE_CURRENT_BINARY_DIR}/ReplayHUDD3D8Resources.rc")
-file(WRITE "${REPLAYHUD_D3D8_RESOURCES_RC}" "")
+if(NOT EXISTS "${REPLAYHUD_D3D8_RESOURCES_RC}")
+    file(WRITE "${REPLAYHUD_D3D8_RESOURCES_RC}" "")
+endif()
 add_custom_command(
     OUTPUT "${REPLAYHUD_D3D8_RESOURCES_RC}"
     COMMAND "${CMAKE_COMMAND}"
@@ -184,7 +186,9 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     endforeach()
 
     set(REPLAYHUD_APP_RESOURCES_RC "${CMAKE_CURRENT_BINARY_DIR}/ReplayHUDAppResources.rc")
-    file(WRITE "${REPLAYHUD_APP_RESOURCES_RC}" "")
+    if(NOT EXISTS "${REPLAYHUD_APP_RESOURCES_RC}")
+        file(WRITE "${REPLAYHUD_APP_RESOURCES_RC}" "")
+    endif()
     add_custom_command(
         OUTPUT "${REPLAYHUD_APP_RESOURCES_RC}"
         COMMAND "${CMAKE_COMMAND}"
