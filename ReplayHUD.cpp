@@ -325,6 +325,28 @@ bool InjectHookIntoProcess(DWORD processId, const std::wstring& hookDllPath) {
 
 bool InspectOverlayTargetModules(DWORD processId, bool& hookLoaded) {
     hookLoaded = false;
+
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+    if (!process) return false;
+    wchar_t imagePath[32768]{};
+    DWORD imagePathLength = static_cast<DWORD>(std::size(imagePath));
+    const BOOL gotImagePath = QueryFullProcessImageNameW(process, 0, imagePath, &imagePathLength);
+    CloseHandle(process);
+    if (!gotImagePath || imagePathLength == 0) return false;
+
+    std::wstring imageName(imagePath, imagePathLength);
+    const size_t imageSeparator = imageName.find_last_of(L"\\/");
+    if (imageSeparator != std::wstring::npos) imageName.erase(0, imageSeparator + 1);
+    static constexpr const wchar_t* excludedProcesses[] = {
+        L"ReplayHUD.exe", L"obs64.exe", L"obs32.exe", L"steam.exe",
+        L"steamwebhelper.exe", L"explorer.exe", L"chrome.exe",
+        L"msedge.exe", L"msedgewebview2.exe", L"firefox.exe",
+        L"brave.exe", L"opera.exe", L"discord.exe", L"telegram.exe",
+        L"vlc.exe", L"mpv.exe", L"spotify.exe", L"taskmgr.exe"
+    };
+    for (const wchar_t* name : excludedProcesses) {
+        if (_wcsicmp(imageName.c_str(), name) == 0) return false;
+    }
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, processId);
     if (snapshot == INVALID_HANDLE_VALUE) return false;
 
