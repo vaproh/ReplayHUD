@@ -19,6 +19,7 @@
 namespace {
 
 HANDLE g_overlayMapping = nullptr;
+HANDLE g_overlayMutex = nullptr;
 const replayhud::OverlayPayload* g_overlayPayload = nullptr;
 
 void LogHook(const wchar_t* message) {
@@ -60,40 +61,41 @@ void LogHook(const wchar_t* message) {
 
 bool InitializeOverlayMapping() {
     if (g_overlayPayload) return true;
+    g_overlayMutex = OpenMutexW(SYNCHRONIZE | MUTEX_MODIFY_STATE, FALSE,
+        replayhud::kOverlayMutexName);
+    if (!g_overlayMutex) return false;
     g_overlayMapping = OpenFileMappingW(FILE_MAP_READ, FALSE, replayhud::kOverlayMappingName);
-    if (!g_overlayMapping) return false;
+    if (!g_overlayMapping) {
+        CloseHandle(g_overlayMutex);
+        g_overlayMutex = nullptr;
+        return false;
+    }
     g_overlayPayload = static_cast<const replayhud::OverlayPayload*>(
         MapViewOfFile(g_overlayMapping, FILE_MAP_READ, 0, 0, sizeof(replayhud::OverlayPayload)));
     if (!g_overlayPayload) {
         CloseHandle(g_overlayMapping);
         g_overlayMapping = nullptr;
+        CloseHandle(g_overlayMutex);
+        g_overlayMutex = nullptr;
         return false;
     }
     return true;
 }
 
 bool ReadOverlayPayload(replayhud::OverlayPayload& snapshot) {
-    if (!InitializeOverlayMapping() || !g_overlayPayload) return false;
+    if (!InitializeOverlayMapping() || !g_overlayPayload || !g_overlayMutex) return false;
 
-    const volatile LONG* sequence =
-        reinterpret_cast<const volatile LONG*>(&g_overlayPayload->sequence);
-    for (int attempt = 0; attempt < 3; ++attempt) {
-        const LONG before = InterlockedCompareExchange(
-            const_cast<volatile LONG*>(sequence), 0, 0);
-        if (before & 1) continue;
+    // Never stall the game's render thread waiting for a notification update.
+    const DWORD wait = WaitForSingleObject(g_overlayMutex, 0);
+    if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) return false;
 
-        snapshot.version = g_overlayPayload->version;
-        snapshot.active = g_overlayPayload->active;
-        snapshot.expiresAtTick = g_overlayPayload->expiresAtTick;
-        memcpy(snapshot.title, g_overlayPayload->title, sizeof(snapshot.title));
-        memcpy(snapshot.subtitle, g_overlayPayload->subtitle, sizeof(snapshot.subtitle));
-        MemoryBarrier();
-
-        const LONG after = InterlockedCompareExchange(
-            const_cast<volatile LONG*>(sequence), 0, 0);
-        if (before == after && !(after & 1)) return true;
-    }
-    return false;
+    snapshot.version = g_overlayPayload->version;
+    snapshot.active = g_overlayPayload->active;
+    snapshot.expiresAtTick = g_overlayPayload->expiresAtTick;
+    memcpy(snapshot.title, g_overlayPayload->title, sizeof(snapshot.title));
+    memcpy(snapshot.subtitle, g_overlayPayload->subtitle, sizeof(snapshot.subtitle));
+    ReleaseMutex(g_overlayMutex);
+    return true;
 }
 
 std::string WideToUtf8(const wchar_t* text, size_t length) {
@@ -108,6 +110,14 @@ std::string WideToUtf8(const wchar_t* text, size_t length) {
 }
 
 void DrawOverlay() {
+    // A process can remain hooked after the player alt-tabs away. Only draw
+    // into the currently foreground process, never behind another game/app.
+    HWND foreground = GetForegroundWindow();
+    DWORD foregroundPid = 0;
+    if (!foreground) return;
+    GetWindowThreadProcessId(foreground, &foregroundPid);
+    if (foregroundPid != GetCurrentProcessId()) return;
+
     replayhud::OverlayPayload payload{};
     if (!ReadOverlayPayload(payload)) return;
     if (payload.version != replayhud::kOverlayPayloadVersion || payload.active == 0) return;
