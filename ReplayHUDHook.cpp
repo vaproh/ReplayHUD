@@ -25,6 +25,8 @@ std::atomic<HANDLE> g_overlayReadyEvent{ nullptr };
 std::atomic<unsigned int> g_mappingOpenAttempts{ 0 };
 std::atomic<unsigned int> g_readyEventOpenAttempts{ 0 };
 std::atomic_bool g_loggedFirstFrame{ false };
+std::atomic<ULONGLONG> g_lastQueuedNotification{ 0 };
+std::atomic<ULONGLONG> g_lastReadyNotification{ 0 };
 const replayhud::OverlayPayload* g_overlayPayload = nullptr;
 
 void LogHook(const wchar_t* message) {
@@ -99,6 +101,7 @@ bool ReadOverlayPayload(replayhud::OverlayPayload& snapshot) {
     snapshot.version = g_overlayPayload->version;
     snapshot.active = g_overlayPayload->active;
     snapshot.expiresAtTick = g_overlayPayload->expiresAtTick;
+    snapshot.sequence = g_overlayPayload->sequence;
     snapshot.position = g_overlayPayload->position;
     snapshot.marginPx = g_overlayPayload->marginPx;
     memcpy(snapshot.title, g_overlayPayload->title, sizeof(snapshot.title));
@@ -118,7 +121,7 @@ std::string WideToUtf8(const wchar_t* text, size_t length) {
     return result;
 }
 
-void SignalOverlayReady() {
+bool SignalOverlayReady() {
     HANDLE event = g_overlayReadyEvent.load(std::memory_order_acquire);
     if (!event) {
         const unsigned int attempt = g_readyEventOpenAttempts.fetch_add(1, std::memory_order_relaxed);
@@ -134,7 +137,7 @@ void SignalOverlayReady() {
             }
         }
     }
-    if (event) SetEvent(event);
+    return event && SetEvent(event) != FALSE;
 }
 
 void DrawOverlay() {
@@ -193,9 +196,19 @@ void DrawOverlay() {
     draw->AddText(titlePosition, IM_COL32(240, 243, 247, 255), title.c_str());
     draw->AddText(subtitlePosition, IM_COL32(157, 166, 180, 255), subtitle.c_str());
     draw->PopClipRect();
-    SignalOverlayReady();
-    if (!g_loggedFirstFrame.exchange(true, std::memory_order_relaxed))
-        LogHook(L"First in-game notification frame rendered.");
+
+    // The UIH render callback runs before ImGui::Render(). Wait until the
+    // same notification reaches a subsequent frame before telling the app
+    // that the in-game renderer has had a chance to submit it.
+    const ULONGLONG previousQueued =
+        g_lastQueuedNotification.exchange(payload.sequence, std::memory_order_acq_rel);
+    if (previousQueued == payload.sequence &&
+        g_lastReadyNotification.load(std::memory_order_acquire) != payload.sequence &&
+        SignalOverlayReady()) {
+        g_lastReadyNotification.store(payload.sequence, std::memory_order_release);
+        if (!g_loggedFirstFrame.exchange(true, std::memory_order_relaxed))
+            LogHook(L"First in-game notification frame submitted to the renderer.");
+    }
 }
 
 DWORD WINAPI HookThreadProc(LPVOID) {
