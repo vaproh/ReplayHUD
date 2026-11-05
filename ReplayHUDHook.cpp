@@ -11,6 +11,7 @@
 #include <dwrite.h>
 #include <dxgi.h>
 
+#include <algorithm>
 #include <cwchar>
 #include <cstring>
 #include <mutex>
@@ -69,10 +70,12 @@ void LogHook(const wchar_t* message) {
 
     const int bytes = WideCharToMultiByte(CP_UTF8, 0, line, -1, nullptr, 0, nullptr, nullptr);
     if (bytes > 1) {
-        std::string utf8(static_cast<size_t>(bytes - 1), '\0');
-        WideCharToMultiByte(CP_UTF8, 0, line, -1, utf8.data(), bytes, nullptr, nullptr);
-        DWORD written = 0;
-        WriteFile(file, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr);
+        std::string utf8(static_cast<size_t>(bytes), '\0');
+        if (WideCharToMultiByte(CP_UTF8, 0, line, -1, utf8.data(), bytes, nullptr, nullptr) > 0) {
+            utf8.pop_back(); // omit the terminating NUL from the log file
+            DWORD written = 0;
+            WriteFile(file, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr);
+        }
     }
     CloseHandle(file);
 }
