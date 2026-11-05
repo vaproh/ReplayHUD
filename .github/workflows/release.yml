@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure CMake
-        run: cmake -S . -B build -A x64 -DUIH_BUILD_TESTS=ON
+        run: cmake -S . -B build -A x64 -DREPLAYHUD_BUILD_BACKEND_TESTS=ON
 
       - name: Build Release executable
         run: cmake --build build --config Release --parallel
