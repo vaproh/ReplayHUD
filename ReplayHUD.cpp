@@ -89,17 +89,46 @@ void EnsureDefaultConfig() {
 void LoadSettings() {
     g_configPath = GetLocalConfigPath();
     EnsureDefaultConfig();
-    g_settings.port = static_cast<INTERNET_PORT>(std::clamp(
-        GetPrivateProfileIntW(L"OBS", L"port", 4455, g_configPath.c_str()), 1, 65535));
+
+    g_settings.port = static_cast<INTERNET_PORT>(
+        std::clamp<UINT>(
+            GetPrivateProfileIntW(
+                L"OBS", L"port", 4455, g_configPath.c_str()
+            ),
+            1u, 65535u
+        )
+    );
+
     wchar_t password[2048]{};
-    GetPrivateProfileStringW(L"OBS", L"password", L"", password,
-                             static_cast<DWORD>(std::size(password)), g_configPath.c_str());
+
+    GetPrivateProfileStringW(
+        L"OBS", L"password", L"", password,
+        static_cast<DWORD>(std::size(password)),
+        g_configPath.c_str()
+    );
+
     g_settings.password = password;
-    g_settings.sound = GetPrivateProfileIntW(L"HUD", L"sound", 1, g_configPath.c_str()) != 0;
-    g_settings.durationMs = static_cast<UINT>(std::clamp(
-        GetPrivateProfileIntW(L"HUD", L"duration_ms", 1800, g_configPath.c_str()), 800, 7000));
-    g_settings.marginPx = std::clamp(
-        GetPrivateProfileIntW(L"HUD", L"margin_px", 28, g_configPath.c_str()), 8, 160);
+
+    g_settings.sound =
+        GetPrivateProfileIntW(
+            L"HUD", L"sound", 1, g_configPath.c_str()
+        ) != 0;
+
+    g_settings.durationMs = std::clamp<UINT>(
+        GetPrivateProfileIntW(
+            L"HUD", L"duration_ms", 1800, g_configPath.c_str()
+        ),
+        800u, 7000u
+    );
+
+    g_settings.marginPx = static_cast<int>(
+        std::clamp<UINT>(
+            GetPrivateProfileIntW(
+                L"HUD", L"margin_px", 28, g_configPath.c_str()
+            ),
+            8u, 160u
+        )
+    );
 }
 
 std::string WideToUtf8(const std::wstring& input) {

@@ -7,17 +7,23 @@ if(NOT WIN32)
 endif()
 
 add_executable(ReplayHUD WIN32 ReplayHUD.cpp)
+
 target_compile_features(ReplayHUD PRIVATE cxx_std_17)
-target_compile_definitions(ReplayHUD PRIVATE
-    UNICODE _UNICODE _WIN32_WINNT=0x0602 WIN32_LEAN_AND_MEAN NOMINMAX
-)
 
 if(MSVC)
-    set_property(TARGET ReplayHUD PROPERTY MSVC_RUNTIME_LIBRARY
-        "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    set_property(TARGET ReplayHUD PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    )
+
     target_compile_options(ReplayHUD PRIVATE /W4 /O2 /EHsc)
 endif()
 
 target_link_libraries(ReplayHUD PRIVATE
-    user32 gdi32 shell32 winhttp bcrypt crypt32 winmm
+    user32
+    gdi32
+    shell32
+    winhttp
+    bcrypt
+    crypt32
+    winmm
 )
