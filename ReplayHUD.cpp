@@ -354,14 +354,6 @@ void EnsureForegroundHookInjected() {
     GetWindowThreadProcessId(foreground, &processId);
     if (!processId || processId == GetCurrentProcessId()) return;
 
-    // The optional D3D8 proxy can load the hook itself. Avoid loading a second
-    // copy from ReplayHUD's install directory into the same game process.
-    if (IsReplayHUDHookLoaded(processId)) {
-        std::lock_guard<std::mutex> lock(g_injectedProcessesMutex);
-        g_injectedProcesses[processId] = true;
-        return;
-    }
-
     {
         std::lock_guard<std::mutex> lock(g_injectedProcessesMutex);
         auto existing = g_injectedProcesses.find(processId);
@@ -392,6 +384,14 @@ void EnsureForegroundHookInjected() {
     }
 
     if (InjectHookIntoProcess(processId, hookDllPath)) rememberProcess();
+}
+
+void CloseInjectedProcessHandles() {
+    std::lock_guard<std::mutex> lock(g_injectedProcessesMutex);
+    for (auto& entry : g_injectedProcesses) {
+        if (entry.second) CloseHandle(entry.second);
+    }
+    g_injectedProcesses.clear();
 }
 
 int DpiScale(HWND hwnd, int value) {
@@ -1785,6 +1785,7 @@ LRESULT CALLBACK MainWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM l
     case WM_DESTROY:
         g_running.store(false);
         ShutdownOverlayBridge();
+        CloseInjectedProcessHandles();
         if (g_shutdownEvent) SetEvent(g_shutdownEvent);
         ShutdownActiveWebSocket();
         Shell_NotifyIconW(NIM_DELETE, &g_trayData);
