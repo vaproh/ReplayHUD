@@ -7,6 +7,7 @@ ReplayHUD is a lightweight native Windows notification app for OBS Studio's Repl
 ## Features
 
 - **Saved-clip notifications:** listens for OBS WebSocket v5 `ReplayBufferSaved` events and displays the actual saved filename.
+- **Replay buffer state notifications:** shows notifications when OBS replay buffer starts or stops.
 - **Click to open:** click a replay notification to open the saved clip in its default application.
 - **System tray menu:** open Settings, test the notification, open the last replay, view the log, or exit.
 - **Settings window:** configure the OBS WebSocket port/password, sound, notification duration, screen position, edge margin, and Windows startup.
@@ -155,7 +156,7 @@ Important limits:
 
 ## Protocol
 
-ReplayHUD uses OBS WebSocket v5's `Hello` / `Identify` handshake, SHA-256 challenge-response authentication, and the `Outputs` event subscription. It handles the `ReplayBufferSaved` event and reads `eventData.savedReplayPath`.
+ReplayHUD uses OBS WebSocket v5's `Hello` / `Identify` handshake, SHA-256 challenge-response authentication, and the `Outputs` event subscription. It handles `ReplayBufferSaved` (using `eventData.savedReplayPath`) plus replay-buffer state events (`ReplayBufferStateChanged`, `ReplayBufferStarted`, `ReplayBufferStopped`).
 
 ## License
 

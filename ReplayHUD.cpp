@@ -50,6 +50,7 @@ constexpr wchar_t kSettingsClass[] = L"ReplayHUD.SettingsWindow";
 constexpr UINT kTrayMessage = WM_APP + 10;
 constexpr UINT kReplaySavedMessage = WM_APP + 11;
 constexpr UINT kStatusMessage = WM_APP + 12;
+constexpr UINT kReplayBufferStateMessage = WM_APP + 13;
 constexpr UINT_PTR kToastTimer = 1;
 constexpr UINT_PTR kAnimationTimer = 2;
 constexpr UINT kTrayId = 1;
@@ -912,6 +913,11 @@ void PostReplaySaved(const std::wstring& path) {
         reinterpret_cast<WPARAM>(payload), 0)) delete payload;
 }
 
+void PostReplayBufferState(bool active) {
+    if (!g_mainWindow) return;
+    PostMessageW(g_mainWindow, kReplayBufferStateMessage, active ? 1 : 0, 0);
+}
+
 void ObsWorker() {
     while (g_running.load()) {
         Settings settings = SnapshotSettings();
@@ -994,15 +1000,40 @@ void ObsWorker() {
                 if (!parser.Parse(root) || !ParseProtocolOp(root, op) || op != 5) continue;
                 const JsonValue* data = root.Get("d");
                 const JsonValue* eventType = data ? data->Get("eventType") : nullptr;
-                if (!eventType || eventType->type != JsonValue::Type::String ||
-                    eventType->string != "ReplayBufferSaved") continue;
-                const JsonValue* eventData = data->Get("eventData");
-                const JsonValue* savedPath = eventData ? eventData->Get("savedReplayPath") : nullptr;
-                std::string utf8Path;
-                if (savedPath && savedPath->AsString(utf8Path)) {
-                    std::wstring path = Utf8ToWide(utf8Path);
-                    if (!path.empty()) PostReplaySaved(path);
-                    Log(L"OBS reported a saved replay: " + path);
+                if (!eventType || eventType->type != JsonValue::Type::String) continue;
+
+                if (eventType->string == "ReplayBufferSaved") {
+                    const JsonValue* eventData = data->Get("eventData");
+                    const JsonValue* savedPath = eventData ? eventData->Get("savedReplayPath") : nullptr;
+                    std::string utf8Path;
+                    if (savedPath && savedPath->AsString(utf8Path)) {
+                        std::wstring path = Utf8ToWide(utf8Path);
+                        if (!path.empty()) PostReplaySaved(path);
+                        Log(L"OBS reported a saved replay: " + path);
+                    }
+                    continue;
+                }
+
+                if (eventType->string == "ReplayBufferStarted") {
+                    PostReplayBufferState(true);
+                    Log(L"OBS replay buffer started.");
+                    continue;
+                }
+
+                if (eventType->string == "ReplayBufferStopped") {
+                    PostReplayBufferState(false);
+                    Log(L"OBS replay buffer stopped.");
+                    continue;
+                }
+
+                if (eventType->string == "ReplayBufferStateChanged") {
+                    const JsonValue* eventData = data->Get("eventData");
+                    const JsonValue* outputActive = eventData ? eventData->Get("outputActive") : nullptr;
+                    if (outputActive && outputActive->type == JsonValue::Type::Boolean) {
+                        PostReplayBufferState(outputActive->boolean);
+                        Log(outputActive->boolean ? L"OBS replay buffer started."
+                                                  : L"OBS replay buffer stopped.");
+                    }
                 }
             }
         } else if (g_running.load()) {
@@ -1067,7 +1098,8 @@ bool AddTrayIcon(HWND hwnd) {
 
 void ShowSettingsWindow();
 void SetConnectionTooltip(ConnectionStatus status);
-void ShowNotification(const std::wstring& path, bool test);
+void ShowNotification(const std::wstring& path, bool test,
+    const std::wstring& customTitle = L"", const std::wstring& customSubtitle = L"");
 
 void ShowTrayMenu(HWND hwnd) {
     HMENU menu = CreatePopupMenu();
@@ -1124,11 +1156,14 @@ void SetToastText(const std::wstring& title, const std::wstring& subtitle,
     g_toastPath = path;
 }
 
-void ShowNotification(const std::wstring& path, bool test) {
+void ShowNotification(const std::wstring& path, bool test,
+    const std::wstring& customTitle, const std::wstring& customSubtitle) {
     if (!g_overlayWindow) return;
     Settings settings = SnapshotSettings();
 
-    if (test) {
+    if (!customTitle.empty() || !customSubtitle.empty()) {
+        SetToastText(customTitle, customSubtitle, L"");
+    } else if (test) {
         SetToastText(L"REPLAYHUD TEST", L"This is how saved clips will appear", L"");
     } else {
         std::wstring fileName = FileNameFromPath(path);
@@ -1599,6 +1634,12 @@ LRESULT CALLBACK MainWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM l
         if (path) ShowNotification(*path, false);
         return 0;
     }
+    case kReplayBufferStateMessage:
+        if (wParam != 0)
+            ShowNotification(L"", false, L"REPLAY BUFFER STARTED", L"OBS replay buffer is running");
+        else
+            ShowNotification(L"", false, L"REPLAY BUFFER STOPPED", L"OBS replay buffer is off");
+        return 0;
     case kStatusMessage:
         SetConnectionTooltip(static_cast<ConnectionStatus>(wParam));
         return 0;
