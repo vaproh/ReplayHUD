@@ -145,6 +145,8 @@ A manual run from the Actions tab builds and uploads workflow artifacts but does
 
 The in-game overlay uses a pinned revision of the MIT-licensed [Universal Dear ImGui Hook](https://github.com/Sh0ckFR/Universal-Dear-ImGui-Hook) as its graphics interception and rendering layer. ReplayHUD supplies the notification UI and shared-memory bridge; the backend library handles API detection, present hooks, device lifecycle, and graphics-state management.
 
+This ReplayHUD application is Windows-only. It does not yet include a native Linux companion for Linux games or Proton/Wine sessions.
+
 | Graphics API | Status in this build |
 |---|---|
 | Direct3D 8 | Supported through the bundled d3d8to9 proxy, which translates D3D8 to D3D9. Requires per-game proxy installation. |
