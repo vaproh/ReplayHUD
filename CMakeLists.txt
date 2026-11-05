@@ -65,7 +65,10 @@ if(MSVC)
     set_property(TARGET d3d8to9 PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
     )
-    target_compile_options(d3d8to9 PRIVATE /W3 /utf-8)
+    target_compile_options(d3d8to9 PRIVATE
+        "$<$<COMPILE_LANGUAGE:CXX>:/W3>"
+        "$<$<COMPILE_LANGUAGE:CXX>:/utf-8>"
+    )
 endif()
 set_target_properties(d3d8to9 PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/d3d8-proxy"
@@ -95,7 +98,12 @@ if(MSVC)
     set_property(TARGET ReplayHUD PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
     )
-    target_compile_options(ReplayHUD PRIVATE /W4 /permissive- /utf-8 /EHsc)
+    target_compile_options(ReplayHUD PRIVATE
+        "$<$<COMPILE_LANGUAGE:CXX>:/W4>"
+        "$<$<COMPILE_LANGUAGE:CXX>:/permissive->"
+        "$<$<COMPILE_LANGUAGE:CXX>:/utf-8>"
+        "$<$<COMPILE_LANGUAGE:CXX>:/EHsc>"
+    )
 endif()
 
 target_link_libraries(ReplayHUD PRIVATE
