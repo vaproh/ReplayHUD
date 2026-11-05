@@ -1,0 +1,84 @@
+name: Fast Verification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "CMakeLists.txt"
+      - "ReplayHUD*.cpp"
+      - "ReplayHUD*.h"
+      - "resource.h"
+      - "cmake/**"
+      - ".github/workflows/**"
+  pull_request:
+    paths:
+      - "CMakeLists.txt"
+      - "ReplayHUD*.cpp"
+      - "ReplayHUD*.h"
+      - "resource.h"
+      - "cmake/**"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: replayhud-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify bundled-resource wiring
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Check resource IDs and CMake wiring
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          root = Path(".")
+          cmake = (root / "CMakeLists.txt").read_text()
+          ids = (root / "resource.h").read_text()
+          d3d8 = (root / "cmake/GenerateD3D8Resources.cmake").read_text()
+          app = (root / "cmake/GenerateAppResources.cmake").read_text()
+          workflow = (root / ".github/workflows/release.yml").read_text()
+
+          required_ids = [
+              "IDR_D3D8_REPLAYHUD_HOOK",
+              "IDR_REPLAYHUD_HOOK_X64",
+              "IDR_REPLAYHUD_HOOK_X86",
+              "IDR_REPLAYHUD_INJECTOR_X86",
+          ]
+          for symbol in required_ids:
+              if symbol not in ids:
+                  sys.exit(f"Missing resource ID: {symbol}")
+
+          checks = {
+              "D3D8 resource generator embeds hook": "IDR_D3D8_REPLAYHUD_HOOK RCDATA" in d3d8,
+              "app resource generator embeds x64 hook": "IDR_REPLAYHUD_HOOK_X64 RCDATA" in app,
+              "app resource generator embeds x86 hook": "IDR_REPLAYHUD_HOOK_X86 RCDATA" in app,
+              "app resource generator embeds x86 injector": "IDR_REPLAYHUD_INJECTOR_X86 RCDATA" in app,
+              "generated D3D8 RC is registered as RC": 'GENERATED TRUE LANGUAGE RC' in cmake and "REPLAYHUD_D3D8_RESOURCES_RC" in cmake,
+              "generated app RC is registered as RC": cmake.count('GENERATED TRUE LANGUAGE RC') >= 2 and "REPLAYHUD_APP_RESOURCES_RC" in cmake,
+              "x86 components are built before x64 configure": workflow.index("Configure x86") < workflow.index("Build x86 hook") < workflow.index("Configure x64 app"),
+              "release packaging checks expected files": "Expected release file not found" in workflow,
+              "tag releases are gated on successful build": "needs: build" in workflow and "startsWith(github.ref, 'refs/tags/v')" in workflow,
+          }
+
+          failed = [name for name, ok in checks.items() if not ok]
+          for name, ok in checks.items():
+              print(f"{'PASS' if ok else 'FAIL'} {name}")
+          if failed:
+              sys.exit(1)
+          print(f"Verified {len(checks)} source/config invariants.")
+          PY
