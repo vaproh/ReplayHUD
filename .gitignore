@@ -1,0 +1,11 @@
+/build/
+/out/
+/Release/
+/Debug/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+.vs/
+.vscode/
