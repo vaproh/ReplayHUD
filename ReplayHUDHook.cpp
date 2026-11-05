@@ -7,6 +7,8 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cstring>
+#include <cwchar>
 #include <string>
 
 #include <imgui.h>
@@ -16,7 +18,6 @@
 
 namespace {
 
-HMODULE g_module = nullptr;
 HANDLE g_overlayMapping = nullptr;
 const replayhud::OverlayPayload* g_overlayPayload = nullptr;
 
@@ -164,7 +165,6 @@ DWORD WINAPI HookThreadProc(LPVOID) {
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
     switch (reason) {
     case DLL_PROCESS_ATTACH: {
-        g_module = module;
         DisableThreadLibraryCalls(module);
         HANDLE thread = CreateThread(nullptr, 0, HookThreadProc, nullptr, 0, nullptr);
         if (thread) CloseHandle(thread);
