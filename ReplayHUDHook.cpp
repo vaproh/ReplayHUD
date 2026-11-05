@@ -7,6 +7,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <cwchar>
 #include <string>
@@ -20,6 +21,7 @@ namespace {
 
 HANDLE g_overlayMapping = nullptr;
 HANDLE g_overlayMutex = nullptr;
+HANDLE g_overlayReadyEvent = nullptr;
 const replayhud::OverlayPayload* g_overlayPayload = nullptr;
 
 void LogHook(const wchar_t* message) {
@@ -111,6 +113,14 @@ std::string WideToUtf8(const wchar_t* text, size_t length) {
     return result;
 }
 
+void SignalOverlayReady() {
+    if (!g_overlayReadyEvent) {
+        HANDLE opened = OpenEventW(EVENT_MODIFY_STATE, FALSE, replayhud::kOverlayReadyEventName);
+        if (opened) g_overlayReadyEvent = opened;
+    }
+    if (g_overlayReadyEvent) SetEvent(g_overlayReadyEvent);
+}
+
 void DrawOverlay() {
     // A process can remain hooked after the player alt-tabs away. Only draw
     // into the currently foreground process, never behind another game/app.
@@ -155,6 +165,7 @@ void DrawOverlay() {
     const ImVec2 subtitlePosition(left + 20.0f, top + 57.0f);
     draw->AddText(titlePosition, IM_COL32(240, 243, 247, 255), title.c_str());
     draw->AddText(subtitlePosition, IM_COL32(157, 166, 180, 255), subtitle.c_str());
+    SignalOverlayReady();
 }
 
 DWORD WINAPI HookThreadProc(LPVOID) {
