@@ -154,8 +154,12 @@ set_target_properties(ReplayHUDHook PROPERTIES OUTPUT_NAME "ReplayHUDHook")
 # D3D8 proxy is a standalone per-game DLL. Embed the architecture-matching
 # hook so users do not need to copy a second file beside the game executable.
 set(REPLAYHUD_D3D8_RESOURCES_RC "${CMAKE_CURRENT_BINARY_DIR}/ReplayHUDD3D8Resources.rc")
-add_custom_command(
-    OUTPUT "${REPLAYHUD_D3D8_RESOURCES_RC}"
+# CMake needs the generated RC source to exist during generation. The custom
+# target fills it with the real hook path before the proxy target is compiled.
+if(NOT EXISTS "${REPLAYHUD_D3D8_RESOURCES_RC}")
+    file(WRITE "${REPLAYHUD_D3D8_RESOURCES_RC}" "")
+endif()
+add_custom_target(ReplayHUDD3D8Resources
     COMMAND "${CMAKE_COMMAND}"
         "-DOUTPUT=${REPLAYHUD_D3D8_RESOURCES_RC}"
         "-DHOOK=$<TARGET_FILE:ReplayHUDHook>"
@@ -170,7 +174,7 @@ target_include_directories(d3d8to9 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
-add_dependencies(d3d8to9 ReplayHUDHook)
+add_dependencies(d3d8to9 ReplayHUDD3D8Resources)
 
 # The 64-bit launcher bundles both hook architectures and the 32-bit helper.
 # Build x86 components first, then pass their paths to the x64 configuration.
