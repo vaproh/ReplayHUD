@@ -21,6 +21,20 @@ FetchContent_Declare(universal_imgui_hook
 )
 FetchContent_MakeAvailable(universal_imgui_hook)
 
+# Direct3D 8 has no renderer backend in the universal hook. Build the
+# established D3D8-to-D3D9 compatibility proxy and bootstrap ReplayHUDHook
+# from that proxy. The actual overlay then uses the already-tested D3D9 path.
+set(D3D8TO9_STATIC OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(d3d8to9
+    GIT_REPOSITORY https://github.com/crosire/d3d8to9.git
+    GIT_TAG 255338f698c8270b537f0a91a13f795f4f988250
+)
+FetchContent_MakeAvailable(d3d8to9)
+target_sources(d3d8to9 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/ReplayHUDD3D8Bootstrap.cpp")
+set_target_properties(d3d8to9 PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/d3d8-proxy"
+)
+
 # Embed the icon using an absolute path so RC resolves it consistently in
 # out-of-source and GitHub Actions builds.
 file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/assets/ReplayHUD.ico" REPLAYHUD_ICON_FILE)
