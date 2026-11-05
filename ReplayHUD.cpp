@@ -138,40 +138,65 @@ std::map<DWORD, bool> g_injectedProcesses;
 
 void PublishOverlayPayload(const std::wstring& title, const std::wstring& subtitle, UINT durationMs) {
     if (!g_overlayPayload) return;
-    InterlockedIncrement(&g_overlayPayload->sequence); // odd: writer owns the payload
-    g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
-    g_overlayPayload->active = 1;
-    g_overlayPayload->expiresAtTick = GetTickCount64() + durationMs;
-    wcsncpy_s(g_overlayPayload->title, title.c_str(), _TRUNCATE);
-    wcsncpy_s(g_overlayPayload->subtitle, subtitle.c_str(), _TRUNCATE);
-    MemoryBarrier();
-    InterlockedIncrement(&g_overlayPayload->sequence); // even: publish complete payload
+    HANDLE mutex = OpenMutexW(SYNCHRONIZE | MUTEX_MODIFY_STATE, FALSE,
+        replayhud::kOverlayMutexName);
+    if (!mutex) return;
+    const DWORD wait = WaitForSingleObject(mutex, 100);
+    if (wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED) {
+        g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
+        g_overlayPayload->active = 1;
+        g_overlayPayload->expiresAtTick = GetTickCount64() + durationMs;
+        wcsncpy_s(g_overlayPayload->title, title.c_str(), _TRUNCATE);
+        wcsncpy_s(g_overlayPayload->subtitle, subtitle.c_str(), _TRUNCATE);
+        ReleaseMutex(mutex);
+    }
+    CloseHandle(mutex);
 }
 
 void ClearOverlayPayload() {
     if (!g_overlayPayload) return;
-    InterlockedIncrement(&g_overlayPayload->sequence);
-    g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
-    g_overlayPayload->active = 0;
-    g_overlayPayload->expiresAtTick = 0;
-    g_overlayPayload->title[0] = L'\0';
-    g_overlayPayload->subtitle[0] = L'\0';
-    MemoryBarrier();
-    InterlockedIncrement(&g_overlayPayload->sequence);
+    HANDLE mutex = OpenMutexW(SYNCHRONIZE | MUTEX_MODIFY_STATE, FALSE,
+        replayhud::kOverlayMutexName);
+    if (!mutex) return;
+    const DWORD wait = WaitForSingleObject(mutex, 100);
+    if (wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED) {
+        g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
+        g_overlayPayload->active = 0;
+        g_overlayPayload->expiresAtTick = 0;
+        g_overlayPayload->title[0] = L'\0';
+        g_overlayPayload->subtitle[0] = L'\0';
+        ReleaseMutex(mutex);
+    }
+    CloseHandle(mutex);
 }
 
 bool InitializeOverlayBridge() {
+    HANDLE mutex = CreateMutexW(nullptr, FALSE, replayhud::kOverlayMutexName);
+    if (!mutex) return false;
     g_overlayMapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
         static_cast<DWORD>(sizeof(replayhud::OverlayPayload)), replayhud::kOverlayMappingName);
-    if (!g_overlayMapping) return false;
+    if (!g_overlayMapping) {
+        CloseHandle(mutex);
+        return false;
+    }
     g_overlayPayload = static_cast<replayhud::OverlayPayload*>(
         MapViewOfFile(g_overlayMapping, FILE_MAP_WRITE, 0, 0, sizeof(replayhud::OverlayPayload)));
     if (!g_overlayPayload) {
         CloseHandle(g_overlayMapping);
         g_overlayMapping = nullptr;
+        CloseHandle(mutex);
         return false;
     }
-    ClearOverlayPayload();
+    const DWORD wait = WaitForSingleObject(mutex, 100);
+    if (wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED) {
+        g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
+        g_overlayPayload->active = 0;
+        g_overlayPayload->expiresAtTick = 0;
+        g_overlayPayload->title[0] = L'\0';
+        g_overlayPayload->subtitle[0] = L'\0';
+        ReleaseMutex(mutex);
+    }
+    CloseHandle(mutex);
     return true;
 }
 
