@@ -20,7 +20,7 @@ if errorlevel 1 exit /b 1
 cmake --build build --config Release --parallel
 if errorlevel 1 exit /b 1
 
-cmake -S . -B build-x86 -A Win32 -DUIH_BUILD_TESTS=OFF
+cmake -S . -B build-x86 -A Win32 -DREPLAYHUD_BUILD_BACKEND_TESTS=OFF
 if errorlevel 1 exit /b 1
 
 cmake --build build-x86 --config Release --target ReplayHUDHook d3d8to9 ReplayHUDInjector32 --parallel
