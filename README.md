@@ -11,9 +11,10 @@ ReplayHUD is a lightweight native Windows notification app for OBS Studio's Repl
 - **System tray menu:** open Settings, test the notification, open the last replay, view the log, or exit.
 - **Settings window:** configure the OBS WebSocket port/password, sound, notification duration, screen position, edge margin, and Windows startup.
 - **Password protection:** stores the OBS WebSocket password using Windows DPAPI for the current Windows user account.
-- **Native Windows app:** C++17 and Win32 APIs; no Electron, browser runtime, .NET runtime, game injection, or third-party DLLs.
+- **Native Windows app:** C++17 and Win32 APIs; no Electron, browser runtime, or .NET runtime.
 - **Embedded icon:** the ReplayHUD icon is compiled into the executable and used for the app, tray, and notification.
 - **Automatic reconnect:** changing the OBS connection settings requests a clean WebSocket shutdown and reconnect.
+- **Experimental game hook companion:** publishes replay text to `ReplayHUDHook.dll`, which can render over D3D11 games when injection succeeds.
 
 ## Requirements
 
@@ -95,10 +96,11 @@ Open **x64 Native Tools Command Prompt for VS 2022**, change to the repository d
 build.bat
 ```
 
-The executable is created at:
+The executable and hook companion DLL are created at:
 
 ```text
 build\Release\ReplayHUD.exe
+build\Release\ReplayHUDHook.dll
 ```
 
 You can also build directly with CMake:
@@ -134,7 +136,14 @@ A manual run from the Actions tab builds and uploads workflow artifacts but does
 
 ## Display limitations
 
-ReplayHUD is a normal topmost Windows desktop window, not an injected game overlay. Use borderless-windowed mode for the most reliable visibility over games. Exclusive-fullscreen applications and some anti-cheat or overlay policies can prevent third-party desktop windows from appearing above the game.
+ReplayHUD still shows its normal topmost desktop toast window. It now also publishes the active toast to an experimental D3D11 hook companion (`ReplayHUDHook.dll`) and attempts foreground-process injection when a replay is saved.
+
+Important limits:
+
+- Hook rendering currently targets **D3D11 Present** only.
+- Exclusive-fullscreen and borderless-fullscreen visibility depends on successful injection and game/anti-cheat policy.
+- Anti-cheat protected titles may block or terminate external overlay injections.
+- If injection fails, ReplayHUD continues using the regular desktop toast behavior.
 
 ## Troubleshooting
 

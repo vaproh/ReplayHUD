@@ -29,6 +29,7 @@
 #include <utility>
 #include <vector>
 
+#include "ReplayHUDOverlayBridge.h"
 #include "resource.h"
 
 #pragma comment(lib, "user32.lib")
@@ -129,6 +130,134 @@ UINT g_taskbarCreatedMessage = 0;
 ConnectionStatus g_status = ConnectionStatus::Connecting;
 HFONT g_uiFont = nullptr;
 HFONT g_uiBoldFont = nullptr;
+HANDLE g_overlayMapping = nullptr;
+replayhud::OverlayPayload* g_overlayPayload = nullptr;
+std::mutex g_injectedProcessesMutex;
+std::map<DWORD, bool> g_injectedProcesses;
+
+void PublishOverlayPayload(const std::wstring& title, const std::wstring& subtitle, UINT durationMs) {
+    if (!g_overlayPayload) return;
+    replayhud::OverlayPayload payload{};
+    payload.version = replayhud::kOverlayPayloadVersion;
+    payload.active = 1;
+    payload.expiresAtTick = GetTickCount64() + durationMs;
+    wcsncpy_s(payload.title, title.c_str(), _TRUNCATE);
+    wcsncpy_s(payload.subtitle, subtitle.c_str(), _TRUNCATE);
+    *g_overlayPayload = payload;
+}
+
+void ClearOverlayPayload() {
+    if (!g_overlayPayload) return;
+    g_overlayPayload->version = replayhud::kOverlayPayloadVersion;
+    g_overlayPayload->active = 0;
+    g_overlayPayload->expiresAtTick = 0;
+    g_overlayPayload->title[0] = L'\0';
+    g_overlayPayload->subtitle[0] = L'\0';
+}
+
+bool InitializeOverlayBridge() {
+    g_overlayMapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
+        static_cast<DWORD>(sizeof(replayhud::OverlayPayload)), replayhud::kOverlayMappingName);
+    if (!g_overlayMapping) return false;
+    g_overlayPayload = static_cast<replayhud::OverlayPayload*>(
+        MapViewOfFile(g_overlayMapping, FILE_MAP_WRITE, 0, 0, sizeof(replayhud::OverlayPayload)));
+    if (!g_overlayPayload) {
+        CloseHandle(g_overlayMapping);
+        g_overlayMapping = nullptr;
+        return false;
+    }
+    ClearOverlayPayload();
+    return true;
+}
+
+void ShutdownOverlayBridge() {
+    ClearOverlayPayload();
+    if (g_overlayPayload) {
+        UnmapViewOfFile(g_overlayPayload);
+        g_overlayPayload = nullptr;
+    }
+    if (g_overlayMapping) {
+        CloseHandle(g_overlayMapping);
+        g_overlayMapping = nullptr;
+    }
+}
+
+std::wstring GetHookDllPath() {
+    wchar_t modulePath[MAX_PATH]{};
+    if (!GetModuleFileNameW(nullptr, modulePath, static_cast<DWORD>(std::size(modulePath)))) return L"";
+    std::wstring path(modulePath);
+    const size_t separator = path.find_last_of(L"\\/");
+    if (separator == std::wstring::npos) return L"";
+    path.resize(separator + 1);
+    path += L"ReplayHUDHook.dll";
+    return path;
+}
+
+bool InjectHookIntoProcess(DWORD processId, const std::wstring& hookDllPath) {
+    HANDLE process = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION |
+        PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, FALSE, processId);
+    if (!process) return false;
+
+    const size_t bytes = (hookDllPath.size() + 1) * sizeof(wchar_t);
+    LPVOID remotePath = VirtualAllocEx(process, nullptr, bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if (!remotePath) {
+        CloseHandle(process);
+        return false;
+    }
+    BOOL wrote = WriteProcessMemory(process, remotePath, hookDllPath.c_str(), bytes, nullptr);
+    if (!wrote) {
+        VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
+        CloseHandle(process);
+        return false;
+    }
+
+    HMODULE kernel = GetModuleHandleW(L"kernel32.dll");
+    auto loadLibrary = reinterpret_cast<LPTHREAD_START_ROUTINE>(
+        kernel ? GetProcAddress(kernel, "LoadLibraryW") : nullptr);
+    if (!loadLibrary) {
+        VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
+        CloseHandle(process);
+        return false;
+    }
+
+    HANDLE remoteThread = CreateRemoteThread(process, nullptr, 0, loadLibrary, remotePath, 0, nullptr);
+    if (!remoteThread) {
+        VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
+        CloseHandle(process);
+        return false;
+    }
+
+    WaitForSingleObject(remoteThread, 1500);
+    DWORD remoteResult = 0;
+    GetExitCodeThread(remoteThread, &remoteResult);
+    CloseHandle(remoteThread);
+    VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
+    CloseHandle(process);
+    return remoteResult != 0;
+}
+
+void EnsureForegroundHookInjected() {
+    std::wstring hookDllPath = GetHookDllPath();
+    if (hookDllPath.empty()) return;
+    if (GetFileAttributesW(hookDllPath.c_str()) == INVALID_FILE_ATTRIBUTES) return;
+
+    HWND foreground = GetForegroundWindow();
+    if (!foreground) return;
+
+    DWORD processId = 0;
+    GetWindowThreadProcessId(foreground, &processId);
+    if (!processId || processId == GetCurrentProcessId()) return;
+
+    {
+        std::lock_guard<std::mutex> lock(g_injectedProcessesMutex);
+        if (g_injectedProcesses.count(processId) != 0) return;
+    }
+
+    if (InjectHookIntoProcess(processId, hookDllPath)) {
+        std::lock_guard<std::mutex> lock(g_injectedProcessesMutex);
+        g_injectedProcesses[processId] = true;
+    }
+}
 
 int DpiScale(HWND hwnd, int value) {
     UINT dpi = hwnd ? GetDpiForWindow(hwnd) : 96;
@@ -1012,6 +1141,9 @@ void ShowNotification(const std::wstring& path, bool test) {
             MessageBeep(MB_ICONASTERISK);
     }
 
+    PublishOverlayPayload(g_toastTitle, g_toastSubtitle, settings.durationMs);
+    EnsureForegroundHookInjected();
+
     POINT cursor{};
     GetCursorPos(&cursor);
     HWND foreground = GetForegroundWindow();
@@ -1078,6 +1210,7 @@ LRESULT CALLBACK OverlayWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
         return MA_NOACTIVATE;
     case WM_LBUTTONUP:
         if (!g_toastPath.empty()) OpenLastReplay();
+        ClearOverlayPayload();
         ShowWindow(hwnd, SW_HIDE);
         return 0;
     case WM_TIMER:
@@ -1093,6 +1226,7 @@ LRESULT CALLBACK OverlayWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
             KillTimer(hwnd, kAnimationTimer);
         } else if (wParam == kToastTimer) {
             KillTimer(hwnd, kToastTimer);
+            ClearOverlayPayload();
             ShowWindow(hwnd, SW_HIDE);
         }
         return 0;
@@ -1475,6 +1609,7 @@ LRESULT CALLBACK MainWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM l
         return 0;
     case WM_DESTROY:
         g_running.store(false);
+        ShutdownOverlayBridge();
         if (g_shutdownEvent) SetEvent(g_shutdownEvent);
         ShutdownActiveWebSocket();
         Shell_NotifyIconW(NIM_DELETE, &g_trayData);
@@ -1596,6 +1731,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     HRGN region = CreateRoundRectRgn(0, 0, kToastWidth + 1, kToastHeight + 1, 22, 22);
     if (region && !SetWindowRgn(g_overlayWindow, region, TRUE))
         DeleteObject(region);
+
+    if (!InitializeOverlayBridge()) {
+        Log(L"Overlay hook bridge unavailable; continuing with desktop notification window only.");
+    }
 
     if (!AddTrayIcon(g_mainWindow)) {
         MessageBoxW(g_mainWindow, L"Windows could not create the ReplayHUD tray icon.",

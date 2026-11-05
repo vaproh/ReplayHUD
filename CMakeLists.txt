@@ -16,6 +16,7 @@ configure_file(ReplayHUD.rc.in "${CMAKE_CURRENT_BINARY_DIR}/ReplayHUD.rc" @ONLY)
 
 add_executable(ReplayHUD WIN32
     ReplayHUD.cpp
+    ReplayHUDOverlayBridge.h
     "${CMAKE_CURRENT_BINARY_DIR}/ReplayHUD.rc"
     resource.h
     assets/ReplayHUD.ico
@@ -43,5 +44,30 @@ target_link_libraries(ReplayHUD PRIVATE
     comctl32
     shcore
 )
+
+add_library(ReplayHUDHook SHARED
+    ReplayHUDHook.cpp
+    ReplayHUDOverlayBridge.h
+)
+
+target_include_directories(ReplayHUDHook PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_features(ReplayHUDHook PRIVATE cxx_std_17)
+
+if(MSVC)
+    set_property(TARGET ReplayHUDHook PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    )
+    target_compile_options(ReplayHUDHook PRIVATE /W4 /permissive- /utf-8 /EHsc)
+endif()
+
+target_link_libraries(ReplayHUDHook PRIVATE
+    user32
+    d3d11
+    d2d1
+    dwrite
+    dxgi
+)
+
+set_target_properties(ReplayHUDHook PROPERTIES OUTPUT_NAME "ReplayHUDHook")
 
 set_target_properties(ReplayHUD PROPERTIES OUTPUT_NAME "ReplayHUD")
