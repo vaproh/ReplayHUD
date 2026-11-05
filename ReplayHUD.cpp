@@ -403,7 +403,6 @@ bool EnsureForegroundHookInjected(HANDLE readyEvent) {
 
     HWND foreground = GetForegroundWindow();
     if (!foreground) {
-        CloseHandle(readyEvent);
         return false;
     }
 
