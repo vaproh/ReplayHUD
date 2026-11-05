@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build Windows x64 and x86
+    name: Build bundled x64 app and x86 runtime
     runs-on: windows-latest
     timeout-minutes: 45
 
@@ -26,17 +26,19 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Configure x64
-        run: cmake -S . -B build -A x64 -DREPLAYHUD_BUILD_BACKEND_TESTS=OFF
-
-      - name: Build x64
-        run: cmake --build build --config Release --parallel
-
       - name: Configure x86
         run: cmake -S . -B build-x86 -A Win32 -DREPLAYHUD_BUILD_BACKEND_TESTS=OFF
 
-      - name: Build x86 components
+      - name: Build x86 hook, D3D8 proxy, and injector
         run: cmake --build build-x86 --config Release --target ReplayHUDHook d3d8to9 ReplayHUDInjector32 --parallel
+
+      - name: Configure x64 app with x86 runtime components
+        shell: pwsh
+        run: |
+          cmake -S . -B build -A x64 -DREPLAYHUD_BUILD_BACKEND_TESTS=OFF "-DREPLAYHUD_X86_HOOK=$PWD/build-x86/Release/ReplayHUDHook.dll" "-DREPLAYHUD_X86_INJECTOR=$PWD/build-x86/Release/ReplayHUDInjector32.exe"
+
+      - name: Build x64 app and proxy
+        run: cmake --build build --config Release --parallel
 
       - name: Package release
         shell: pwsh
@@ -44,30 +46,28 @@ jobs:
           $ErrorActionPreference = "Stop"
           $files = @(
             "build/Release/ReplayHUD.exe",
-            "build/Release/ReplayHUDHook.dll",
             "build/d3d8-proxy/Release/d3d8.dll",
-            "build-x86/Release/ReplayHUDHook.dll",
             "build-x86/d3d8-proxy/Release/d3d8.dll",
-            "build-x86/Release/ReplayHUDInjector32.exe"
+            "README.md",
+            "LICENSE.txt",
+            "build/_deps/universal_imgui_hook-src/LICENSE",
+            "build/_deps/d3d8to9-src/LICENSE.md"
           )
           foreach ($file in $files) {
             if (!(Test-Path $file)) { throw "Expected release file not found: $file" }
           }
 
-          New-Item -ItemType Directory -Force -Path release/x86 | Out-Null
+          New-Item -ItemType Directory -Force -Path "release/x86" | Out-Null
           Copy-Item "build/Release/ReplayHUD.exe" "release/ReplayHUD.exe"
-          Copy-Item "build/Release/ReplayHUDHook.dll" "release/ReplayHUDHook.dll"
           Copy-Item "build/d3d8-proxy/Release/d3d8.dll" "release/d3d8.dll"
-          Copy-Item "build-x86/Release/ReplayHUDInjector32.exe" "release/ReplayHUDInjector32.exe"
-          Copy-Item "build-x86/Release/ReplayHUDHook.dll" "release/x86/ReplayHUDHook.dll"
           Copy-Item "build-x86/d3d8-proxy/Release/d3d8.dll" "release/x86/d3d8.dll"
-          Copy-Item README.md "release/README.md"
-          Copy-Item LICENSE.txt "release/LICENSE.txt"
+          Copy-Item "README.md" "release/README.md"
+          Copy-Item "LICENSE.txt" "release/LICENSE.txt"
           Copy-Item "build/_deps/universal_imgui_hook-src/LICENSE" "release/LICENSE-Universal-Dear-ImGui-Hook.txt"
           Copy-Item "build/_deps/d3d8to9-src/LICENSE.md" "release/LICENSE-d3d8to9.txt"
           Compress-Archive -Path "release/*" -DestinationPath "ReplayHUD-Windows.zip" -Force
 
-      - name: Upload release package
+      - name: Upload release artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ReplayHUD-Windows
@@ -101,7 +101,4 @@ jobs:
           files: |
             ReplayHUD-Windows.zip
             release/ReplayHUD.exe
-            release/ReplayHUDHook.dll
             release/d3d8.dll
-            release/ReplayHUDInjector32.exe
-            release/x86/**
