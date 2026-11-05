@@ -5,47 +5,20 @@
 #define _WIN32_WINNT 0x0A00
 
 #include <windows.h>
-#include <d3d11.h>
-#include <d2d1.h>
-#include <d2d1helper.h>
-#include <dwrite.h>
-#include <dxgi.h>
-#include <dxgi1_2.h>
 
 #include <algorithm>
-#include <cwchar>
-#include <cstring>
-#include <mutex>
 #include <string>
 
-#include <MinHook.h>
+#include <imgui.h>
+#include <uih.h>
 
 #include "ReplayHUDOverlayBridge.h"
 
-#pragma comment(lib, "d3d11.lib")
-#pragma comment(lib, "d2d1.lib")
-#pragma comment(lib, "dwrite.lib")
-#pragma comment(lib, "dxgi.lib")
-
 namespace {
 
-template <typename T>
-void SafeRelease(T*& value) {
-    if (value) {
-        value->Release();
-        value = nullptr;
-    }
-}
-
-using PresentFn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT);
-using Present1Fn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain1*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
-using ResizeBuffersFn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
-
-PresentFn g_originalPresent = nullptr;
-Present1Fn g_originalPresent1 = nullptr;
-ResizeBuffersFn g_originalResizeBuffers = nullptr;
-std::mutex g_renderMutex;
-thread_local bool g_insidePresentHook = false;
+HMODULE g_module = nullptr;
+HANDLE g_overlayMapping = nullptr;
+const replayhud::OverlayPayload* g_overlayPayload = nullptr;
 
 void LogHook(const wchar_t* message) {
     OutputDebugStringW(message);
@@ -76,27 +49,13 @@ void LogHook(const wchar_t* message) {
     if (bytes > 1) {
         std::string utf8(static_cast<size_t>(bytes), '\0');
         if (WideCharToMultiByte(CP_UTF8, 0, line, -1, utf8.data(), bytes, nullptr, nullptr) > 0) {
-            utf8.pop_back(); // omit the terminating NUL from the log file
+            utf8.pop_back();
             DWORD written = 0;
             WriteFile(file, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr);
         }
     }
     CloseHandle(file);
 }
-
-HANDLE g_overlayMapping = nullptr;
-const replayhud::OverlayPayload* g_overlayPayload = nullptr;
-
-ID2D1Factory* g_d2dFactory = nullptr;
-IDWriteFactory* g_writeFactory = nullptr;
-ID2D1RenderTarget* g_renderTarget = nullptr;
-ID2D1SolidColorBrush* g_backgroundBrush = nullptr;
-ID2D1SolidColorBrush* g_borderBrush = nullptr;
-ID2D1SolidColorBrush* g_titleBrush = nullptr;
-ID2D1SolidColorBrush* g_subtitleBrush = nullptr;
-IDWriteTextFormat* g_titleFormat = nullptr;
-IDWriteTextFormat* g_subtitleFormat = nullptr;
-IDXGISwapChain* g_boundSwapChain = nullptr;
 
 bool InitializeOverlayMapping() {
     if (g_overlayPayload) return true;
@@ -109,86 +68,6 @@ bool InitializeOverlayMapping() {
         g_overlayMapping = nullptr;
         return false;
     }
-    return true;
-}
-
-void ShutdownOverlayMapping() {
-    if (g_overlayPayload) {
-        UnmapViewOfFile(g_overlayPayload);
-        g_overlayPayload = nullptr;
-    }
-    if (g_overlayMapping) {
-        CloseHandle(g_overlayMapping);
-        g_overlayMapping = nullptr;
-    }
-}
-
-void ReleaseRenderObjects() {
-    SafeRelease(g_backgroundBrush);
-    SafeRelease(g_borderBrush);
-    SafeRelease(g_titleBrush);
-    SafeRelease(g_subtitleBrush);
-    SafeRelease(g_titleFormat);
-    SafeRelease(g_subtitleFormat);
-    SafeRelease(g_renderTarget);
-    if (g_boundSwapChain) {
-        g_boundSwapChain->Release();
-        g_boundSwapChain = nullptr;
-    }
-}
-
-bool EnsureFactories() {
-    if (!g_d2dFactory) {
-        if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &g_d2dFactory))) return false;
-    }
-    if (!g_writeFactory) {
-        if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
-                reinterpret_cast<IUnknown**>(&g_writeFactory)))) return false;
-    }
-    return true;
-}
-
-bool EnsureRenderTarget(IDXGISwapChain* swapChain) {
-    if (!EnsureFactories()) return false;
-    if (g_boundSwapChain != swapChain) {
-        ReleaseRenderObjects();
-    }
-    if (g_renderTarget) return true;
-
-    IDXGISurface* surface = nullptr;
-    if (FAILED(swapChain->GetBuffer(0, __uuidof(IDXGISurface), reinterpret_cast<void**>(&surface)))) {
-        return false;
-    }
-
-    D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
-        D2D1_RENDER_TARGET_TYPE_DEFAULT,
-        D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_PREMULTIPLIED),
-        0.0f, 0.0f);
-    HRESULT hr = g_d2dFactory->CreateDxgiSurfaceRenderTarget(surface, &props, &g_renderTarget);
-    surface->Release();
-    if (FAILED(hr)) return false;
-
-    g_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0x14171D, 0.90f), &g_backgroundBrush);
-    g_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0x363D48, 1.0f), &g_borderBrush);
-    g_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0xF0F3F7, 1.0f), &g_titleBrush);
-    g_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0x9DA6B4, 1.0f), &g_subtitleBrush);
-    if (!g_backgroundBrush || !g_borderBrush || !g_titleBrush || !g_subtitleBrush) return false;
-
-    if (FAILED(g_writeFactory->CreateTextFormat(
-            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, 24.0f, L"", &g_titleFormat))) {
-        return false;
-    }
-    if (FAILED(g_writeFactory->CreateTextFormat(
-            L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, 19.0f, L"", &g_subtitleFormat))) {
-        return false;
-    }
-    g_titleFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-    g_subtitleFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-
-    g_boundSwapChain = swapChain;
-    g_boundSwapChain->AddRef();
     return true;
 }
 
@@ -216,224 +95,67 @@ bool ReadOverlayPayload(replayhud::OverlayPayload& snapshot) {
     return false;
 }
 
-void DrawOverlay(IDXGISwapChain* swapChain) {
+std::string WideToUtf8(const wchar_t* text, size_t length) {
+    if (!text || length == 0) return {};
+    const int bytes = WideCharToMultiByte(CP_UTF8, 0, text,
+        static_cast<int>(length), nullptr, 0, nullptr, nullptr);
+    if (bytes <= 0) return {};
+    std::string result(static_cast<size_t>(bytes), '\0');
+    if (!WideCharToMultiByte(CP_UTF8, 0, text, static_cast<int>(length),
+            result.data(), bytes, nullptr, nullptr)) return {};
+    return result;
+}
+
+void DrawOverlay() {
     replayhud::OverlayPayload payload{};
     if (!ReadOverlayPayload(payload)) return;
     if (payload.version != replayhud::kOverlayPayloadVersion || payload.active == 0) return;
     if (GetTickCount64() > payload.expiresAtTick) return;
-    if (!EnsureRenderTarget(swapChain) || !g_renderTarget) return;
 
-    const D2D1_SIZE_F size = g_renderTarget->GetSize();
-    const float margin = 24.0f;
-    const float width = (std::min)(440.0f, (std::max)(160.0f, size.width - margin * 2.0f));
-    const float height = 110.0f;
-    const float left = (std::max)(margin, size.width - width - margin);
-    const D2D1_ROUNDED_RECT panel{
-        D2D1::RectF(left, margin, left + width, margin + height), 16.0f, 16.0f
-    };
-    const D2D1_RECT_F titleRect = D2D1::RectF(panel.rect.left + 20.0f, panel.rect.top + 14.0f,
-        panel.rect.right - 20.0f, panel.rect.top + 52.0f);
-    const D2D1_RECT_F subtitleRect = D2D1::RectF(panel.rect.left + 20.0f, panel.rect.top + 50.0f,
-        panel.rect.right - 20.0f, panel.rect.bottom - 14.0f);
+    const std::string title = WideToUtf8(payload.title,
+        wcsnlen_s(payload.title, _countof(payload.title)));
+    const std::string subtitle = WideToUtf8(payload.subtitle,
+        wcsnlen_s(payload.subtitle, _countof(payload.subtitle)));
+    if (title.empty() && subtitle.empty()) return;
 
-    g_renderTarget->BeginDraw();
-    g_renderTarget->FillRoundedRectangle(panel, g_backgroundBrush);
-    g_renderTarget->DrawRoundedRectangle(panel, g_borderBrush, 1.0f);
-    g_renderTarget->DrawTextW(payload.title,
-        static_cast<UINT32>(wcsnlen_s(payload.title, _countof(payload.title))),
-        g_titleFormat, titleRect, g_titleBrush);
-    g_renderTarget->DrawTextW(payload.subtitle,
-        static_cast<UINT32>(wcsnlen_s(payload.subtitle, _countof(payload.subtitle))),
-        g_subtitleFormat, subtitleRect, g_subtitleBrush);
-    const HRESULT drawResult = g_renderTarget->EndDraw();
-    if (drawResult == D2DERR_RECREATE_TARGET || FAILED(drawResult)) {
-        ReleaseRenderObjects();
-    }
-}
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+    const ImVec2 display = ImGui::GetIO().DisplaySize;
+    if (!draw || display.x <= 0.0f || display.y <= 0.0f) return;
 
-HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* swapChain, UINT syncInterval, UINT flags) {
-    if (!g_insidePresentHook && (flags & DXGI_PRESENT_TEST) == 0) {
-        std::lock_guard<std::mutex> lock(g_renderMutex);
-        DrawOverlay(swapChain);
-    }
-    const bool wasInside = g_insidePresentHook;
-    g_insidePresentHook = true;
-    const HRESULT result = g_originalPresent
-        ? g_originalPresent(swapChain, syncInterval, flags)
-        : E_FAIL;
-    g_insidePresentHook = wasInside;
-    return result;
-}
+    constexpr float margin = 24.0f;
+    constexpr float panelWidth = 440.0f;
+    constexpr float panelHeight = 110.0f;
+    const float width = (std::min)(panelWidth, (std::max)(160.0f, display.x - margin * 2.0f));
+    const float left = (std::max)(margin, display.x - width - margin);
+    const ImVec2 min(left, margin);
+    const ImVec2 max(left + width, margin + panelHeight);
 
-HRESULT STDMETHODCALLTYPE HookedPresent1(IDXGISwapChain1* swapChain, UINT syncInterval,
-    UINT flags, const DXGI_PRESENT_PARAMETERS* parameters) {
-    if (!g_insidePresentHook && (flags & DXGI_PRESENT_TEST) == 0) {
-        std::lock_guard<std::mutex> lock(g_renderMutex);
-        DrawOverlay(swapChain);
-    }
-    const bool wasInside = g_insidePresentHook;
-    g_insidePresentHook = true;
-    const HRESULT result = g_originalPresent1
-        ? g_originalPresent1(swapChain, syncInterval, flags, parameters)
-        : E_FAIL;
-    g_insidePresentHook = wasInside;
-    return result;
-}
+    draw->AddRectFilled(min, max, IM_COL32(20, 23, 29, 230), 16.0f);
+    draw->AddRect(min, max, IM_COL32(54, 61, 72, 255), 16.0f, 0, 1.0f);
 
-HRESULT __stdcall HookedResizeBuffers(IDXGISwapChain* swapChain, UINT bufferCount,
-    UINT width, UINT height, DXGI_FORMAT newFormat, UINT swapChainFlags) {
-    std::lock_guard<std::mutex> lock(g_renderMutex);
-    if (g_boundSwapChain == swapChain) {
-        // Release the D2D surface reference before DXGI reallocates the back buffers.
-        ReleaseRenderObjects();
-    }
-    return g_originalResizeBuffers
-        ? g_originalResizeBuffers(swapChain, bufferCount, width, height, newFormat, swapChainFlags)
-        : E_FAIL;
-}
-
-bool InstallPresentHook() {
-    MH_STATUS mhStatus = MH_Initialize();
-    if (mhStatus != MH_OK && mhStatus != MH_ERROR_ALREADY_INITIALIZED) {
-        LogHook(L"MinHook initialization failed.");
-        return false;
-    }
-
-    HWND hwnd = CreateWindowExW(0, L"STATIC", L"ReplayHUD hook probe",
-        WS_POPUP, 0, 0, 64, 64, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
-    if (!hwnd) {
-        LogHook(L"Could not create the temporary DXGI probe window.");
-        return false;
-    }
-
-    DXGI_SWAP_CHAIN_DESC desc{};
-    desc.BufferDesc.Width = 64;
-    desc.BufferDesc.Height = 64;
-    desc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    desc.BufferDesc.RefreshRate.Numerator = 60;
-    desc.BufferDesc.RefreshRate.Denominator = 1;
-    desc.SampleDesc.Count = 1;
-    desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    desc.BufferCount = 1;
-    desc.OutputWindow = hwnd;
-    desc.Windowed = TRUE;
-    desc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-
-    IDXGISwapChain* swapChain = nullptr;
-    ID3D11Device* device = nullptr;
-    ID3D11DeviceContext* context = nullptr;
-    const D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0 };
-    D3D_FEATURE_LEVEL level{};
-
-    auto createProbe = [&](D3D_DRIVER_TYPE driverType) {
-        return D3D11CreateDeviceAndSwapChain(nullptr, driverType, nullptr,
-            D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, _countof(levels),
-            D3D11_SDK_VERSION, &desc, &swapChain, &device, &level, &context);
-    };
-
-    HRESULT created = createProbe(D3D_DRIVER_TYPE_HARDWARE);
-    if (FAILED(created)) {
-        SafeRelease(context);
-        SafeRelease(device);
-        SafeRelease(swapChain);
-        created = createProbe(D3D_DRIVER_TYPE_WARP);
-    }
-
-    DestroyWindow(hwnd);
-    if (FAILED(created) || !swapChain) {
-        SafeRelease(context);
-        SafeRelease(device);
-        SafeRelease(swapChain);
-        wchar_t message[128]{};
-        swprintf_s(message, L"Could not create a D3D11 probe swapchain (HRESULT 0x%08X).",
-            static_cast<unsigned>(created));
-        LogHook(message);
-        return false;
-    }
-
-    void** vtable = *reinterpret_cast<void***>(swapChain);
-    void* presentTarget = vtable[8];
-    void* resizeTarget = vtable[13];
-
-    IDXGISwapChain1* swapChain1 = nullptr;
-    HRESULT querySwapChain1 = swapChain->QueryInterface(
-        __uuidof(IDXGISwapChain1), reinterpret_cast<void**>(&swapChain1));
-    if (FAILED(querySwapChain1) || !swapChain1) {
-        LogHook(L"IDXGISwapChain1 is unavailable; Present1 cannot be intercepted.");
-        SafeRelease(context);
-        SafeRelease(device);
-        SafeRelease(swapChain);
-        return false;
-    }
-    void** vtable1 = *reinterpret_cast<void***>(swapChain1);
-    void* present1Target = vtable1[22];
-
-    mhStatus = MH_CreateHook(presentTarget, &HookedPresent,
-        reinterpret_cast<LPVOID*>(&g_originalPresent));
-    if (mhStatus != MH_OK) {
-        LogHook(L"MinHook could not create the IDXGISwapChain::Present hook.");
-        SafeRelease(swapChain1);
-        SafeRelease(context);
-        SafeRelease(device);
-        SafeRelease(swapChain);
-        return false;
-    }
-
-    mhStatus = MH_CreateHook(present1Target, &HookedPresent1,
-        reinterpret_cast<LPVOID*>(&g_originalPresent1));
-    if (mhStatus != MH_OK) {
-        MH_RemoveHook(presentTarget);
-        LogHook(L"MinHook could not create the IDXGISwapChain1::Present1 hook.");
-        SafeRelease(swapChain1);
-        SafeRelease(context);
-        SafeRelease(device);
-        SafeRelease(swapChain);
-        return false;
-    }
-
-    mhStatus = MH_CreateHook(resizeTarget, &HookedResizeBuffers,
-        reinterpret_cast<LPVOID*>(&g_originalResizeBuffers));
-    if (mhStatus != MH_OK) {
-        MH_RemoveHook(presentTarget);
-        MH_RemoveHook(present1Target);
-        LogHook(L"MinHook could not create the IDXGISwapChain::ResizeBuffers hook.");
-        SafeRelease(swapChain1);
-        SafeRelease(context);
-        SafeRelease(device);
-        SafeRelease(swapChain);
-        return false;
-    }
-
-    mhStatus = MH_EnableHook(presentTarget);
-    if (mhStatus == MH_OK) mhStatus = MH_EnableHook(present1Target);
-    if (mhStatus == MH_OK) mhStatus = MH_EnableHook(resizeTarget);
-    SafeRelease(swapChain1);
-    SafeRelease(context);
-    SafeRelease(device);
-    SafeRelease(swapChain);
-
-    if (mhStatus != MH_OK) {
-        MH_DisableHook(presentTarget);
-        MH_DisableHook(present1Target);
-        MH_DisableHook(resizeTarget);
-        MH_RemoveHook(presentTarget);
-        MH_RemoveHook(present1Target);
-        MH_RemoveHook(resizeTarget);
-        LogHook(L"MinHook could not enable the DXGI hooks.");
-        g_originalPresent = nullptr;
-        g_originalPresent1 = nullptr;
-        g_originalResizeBuffers = nullptr;
-        return false;
-    }
-
-    LogHook(L"D3D11 Present, Present1 and ResizeBuffers hooks installed successfully.");
-    return true;
+    const ImVec2 titlePosition(left + 20.0f, margin + 17.0f);
+    const ImVec2 subtitlePosition(left + 20.0f, margin + 57.0f);
+    draw->AddText(titlePosition, IM_COL32(240, 243, 247, 255), title.c_str());
+    draw->AddText(subtitlePosition, IM_COL32(157, 166, 180, 255), subtitle.c_str());
 }
 
 DWORD WINAPI HookThreadProc(LPVOID) {
-    if (!InstallPresentHook()) {
-        LogHook(L"Overlay hook initialization failed; desktop notifications remain available.");
+    if (!InitializeOverlayMapping()) {
+        LogHook(L"Could not open the shared notification mapping; overlay will remain inactive.");
     }
+
+    uih::Config config{};
+    config.module = nullptr;
+    config.backend = uih::Backend::None;
+    config.menuKey = 0;
+    config.unloadKey = 0;
+    config.debugLog = true;
+    config.render = DrawOverlay;
+
+    // Universal Dear ImGui Hook owns API detection, hook installation, device
+    // lifecycle, and renderer state restoration for its supported backends.
+    uih::Start(config);
+    LogHook(L"Multi-API overlay hook startup requested.");
     return 0;
 }
 
@@ -442,14 +164,15 @@ DWORD WINAPI HookThreadProc(LPVOID) {
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
     switch (reason) {
     case DLL_PROCESS_ATTACH: {
+        g_module = module;
         DisableThreadLibraryCalls(module);
         HANDLE thread = CreateThread(nullptr, 0, HookThreadProc, nullptr, 0, nullptr);
         if (thread) CloseHandle(thread);
-        else OutputDebugStringW(L"ReplayHUD: failed to create hook initialization thread.\r\n");
+        else OutputDebugStringW(L"ReplayHUD: failed to create overlay initialization thread.\r\n");
         break;
     }
     case DLL_PROCESS_DETACH:
-        // The DLL is process-lifetime scoped. Avoid COM/D3D teardown under the loader lock.
+        // Do not tear down graphics hooks while the loader lock is held.
         break;
     default:
         break;
