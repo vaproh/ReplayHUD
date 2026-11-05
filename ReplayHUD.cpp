@@ -229,14 +229,60 @@ bool InjectHookIntoProcess(DWORD processId, const std::wstring& hookDllPath) {
         PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, FALSE, processId);
     if (!process) return false;
 
+    BOOL targetIsWow64 = FALSE;
+    if (!IsWow64Process(process, &targetIsWow64)) {
+        CloseHandle(process);
+        return false;
+    }
+
+    if (targetIsWow64) {
+        // A 64-bit process cannot safely use its LoadLibraryW address in a
+        // WOW64 target. Delegate the injection to the packaged 32-bit helper.
+        CloseHandle(process);
+
+        const size_t separator = hookDllPath.find_last_of(L"\\/");
+        if (separator == std::wstring::npos) return false;
+        const std::wstring appDirectory = hookDllPath.substr(0, separator + 1);
+        const std::wstring helperPath = appDirectory + L"ReplayHUDInjector32.exe";
+        const std::wstring x86HookPath = appDirectory + L"x86\\ReplayHUDHook.dll";
+        if (GetFileAttributesW(helperPath.c_str()) == INVALID_FILE_ATTRIBUTES ||
+            GetFileAttributesW(x86HookPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            Log(L"32-bit target detected, but ReplayHUDInjector32.exe or x86\\ReplayHUDHook.dll is missing.");
+            return false;
+        }
+
+        std::wstring command = L"\"" + helperPath + L"\" --pid " +
+            std::to_wstring(processId) + L" --dll \"" + x86HookPath + L"\"";
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION child{};
+        if (!CreateProcessW(helperPath.c_str(), command.data(), nullptr, nullptr, FALSE,
+                CREATE_NO_WINDOW, nullptr, appDirectory.c_str(), &startup, &child)) {
+            Log(L"Failed to start the 32-bit ReplayHUD injection helper.");
+            return false;
+        }
+
+        const DWORD wait = WaitForSingleObject(child.hProcess, 30000);
+        DWORD exitCode = 1;
+        const bool completed = wait == WAIT_OBJECT_0 &&
+            GetExitCodeProcess(child.hProcess, &exitCode) != FALSE;
+        CloseHandle(child.hThread);
+        CloseHandle(child.hProcess);
+        if (!completed) Log(L"32-bit ReplayHUD injection helper timed out or could not report its result.");
+        return completed && exitCode == 0;
+    }
+
     const size_t bytes = (hookDllPath.size() + 1) * sizeof(wchar_t);
-    LPVOID remotePath = VirtualAllocEx(process, nullptr, bytes, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    LPVOID remotePath = VirtualAllocEx(process, nullptr, bytes,
+        MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     if (!remotePath) {
         CloseHandle(process);
         return false;
     }
-    BOOL wrote = WriteProcessMemory(process, remotePath, hookDllPath.c_str(), bytes, nullptr);
-    if (!wrote) {
+
+    SIZE_T written = 0;
+    if (!WriteProcessMemory(process, remotePath, hookDllPath.c_str(), bytes, &written) ||
+        written != bytes) {
         VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
         CloseHandle(process);
         return false;
@@ -251,14 +297,6 @@ bool InjectHookIntoProcess(DWORD processId, const std::wstring& hookDllPath) {
         return false;
     }
 
-    // This build ships an x64 hook DLL. Never attempt to load it into a WOW64 process.
-    BOOL targetIsWow64 = FALSE;
-    if (!IsWow64Process(process, &targetIsWow64) || targetIsWow64) {
-        VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
-        CloseHandle(process);
-        return false;
-    }
-
     HANDLE remoteThread = CreateRemoteThread(process, nullptr, 0, loadLibrary, remotePath, 0, nullptr);
     if (!remoteThread) {
         VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
@@ -266,7 +304,7 @@ bool InjectHookIntoProcess(DWORD processId, const std::wstring& hookDllPath) {
         return false;
     }
 
-    // Do not free remotePath while LoadLibraryW may still be reading it.
+    // Keep the remote string alive until LoadLibraryW has definitely returned.
     const DWORD waitResult = WaitForSingleObject(remoteThread, INFINITE);
     DWORD remoteResult = 0;
     const bool completed = waitResult == WAIT_OBJECT_0 &&
