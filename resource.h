@@ -1,0 +1,4 @@
+#ifndef REPLAYHUD_RESOURCE_H
+#define REPLAYHUD_RESOURCE_H
+#define IDI_REPLAYHUD 101
+#endif

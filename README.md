@@ -1,97 +1,93 @@
 # ReplayHUD
 
-A lightweight Windows notification HUD for OBS Studio's Replay Buffer. When OBS saves a replay clip, ReplayHUD displays a brief, ShadowPlay-style toast and can play a notification sound.
+ReplayHUD is a lightweight native Windows notification app for OBS Studio's Replay Buffer. When OBS saves a replay, ReplayHUD shows a desktop toast with the saved filename and can play a notification sound.
 
-> ReplayHUD is a desktop notification utility. It does not record video, modify clips, or interact with games.
+![ReplayHUD app icon](assets/ReplayHUD-icon-preview.png)
 
 ## Features
 
-- **Replay-saved notifications:** Displays a toast when OBS reports that a Replay Buffer clip has been saved.
-- **Native Windows app:** Built with Win32 C++17. No Electron, browser runtime, .NET runtime, or third-party DLLs.
-- **OBS WebSocket v5:** Connects to OBS through its local WebSocket server and listens for the `ReplayBufferSaved` event.
-- **System tray controls:** Check connection status, test a notification, open settings, or exit.
-- **Configurable HUD:** Adjust notification sound, display duration, and screen-edge margin.
-- **No game injection:** No game hooks, DLL injection, frame polling, or game-process access.
+- **Saved-clip notifications:** listens for OBS WebSocket v5 `ReplayBufferSaved` events and displays the actual saved filename.
+- **Click to open:** click a replay notification to open the saved clip in its default application.
+- **System tray menu:** open Settings, test the notification, open the last replay, view the log, or exit.
+- **Settings window:** configure the OBS WebSocket port/password, sound, notification duration, screen position, edge margin, and Windows startup.
+- **Password protection:** stores the OBS WebSocket password using Windows DPAPI for the current Windows user account.
+- **Native Windows app:** C++17 and Win32 APIs; no Electron, browser runtime, .NET runtime, game injection, or third-party DLLs.
+- **Embedded icon:** the ReplayHUD icon is compiled into the executable and used for the app, tray, and notification.
+- **Automatic reconnect:** changing the OBS connection settings requests a clean WebSocket shutdown and reconnect.
 
 ## Requirements
 
-- Windows 10 or Windows 11, x64.
-- OBS Studio with the built-in WebSocket server enabled.
-- OBS Replay Buffer enabled.
+- Windows 10 version 1703 or newer, 64-bit.
+- OBS Studio with the built-in WebSocket server (OBS Studio 28 or newer is recommended).
+- OBS Replay Buffer enabled and started.
 
 ## Download
 
-Download the latest **ReplayHUD-Windows-x64.zip** or `ReplayHUD.exe` from the repository's [Releases](../../releases) page.
+Download `ReplayHUD-Windows-x64.zip` or `ReplayHUD.exe` from the repository's [Releases](../../releases) page. Extract the ZIP and run `ReplayHUD.exe`.
 
-Extract the ZIP and run `ReplayHUD.exe`. On first launch, ReplayHUD creates its settings file under:
-
-```text
-%LOCALAPPDATA%\ReplayHUD\ReplayHUD.ini
-```
-
-Windows may show a security prompt for an unsigned build. Only run binaries you have obtained from a release you trust.
+On first launch, ReplayHUD starts in the system tray. Click the tray icon with the right mouse button and choose **Settings...**.
 
 ## Configure OBS
 
 1. Open OBS Studio.
 2. Go to **Tools → WebSocket Server Settings**.
-3. Enable the WebSocket server. The default server port is `4455`.
-4. Keep the server local. ReplayHUD connects to `127.0.0.1`.
-5. If authentication is enabled, note the WebSocket password.
-6. Enable **Replay Buffer** in OBS and start it.
+3. Enable the WebSocket server.
+4. Keep the server on its local machine interface. ReplayHUD connects only to `127.0.0.1`.
+5. Note the port (OBS commonly uses `4455`) and password, if authentication is enabled.
+6. Enable and start **Replay Buffer**.
+7. Open ReplayHUD's tray menu → **Settings...** and enter the same port/password.
+8. Click **Save settings**. ReplayHUD reconnects using the new values.
 
-Then right-click the ReplayHUD tray icon and choose **Open settings**. Edit the INI file:
-
-```ini
-[OBS]
-port=4455
-password=your_obs_websocket_password
-
-[HUD]
-sound=1
-duration_ms=1800
-margin_px=28
-```
-
-If OBS WebSocket authentication is disabled, leave `password=` empty. Restart ReplayHUD after changing the file.
-
-**Security note:** The OBS WebSocket password is stored as plain text in the per-user INI file. Do not share that file. Keep the OBS WebSocket server bound to localhost and do not expose it to an untrusted network.
-
-## Use
-
-Right-click the ReplayHUD tray icon to access:
-
-- **Test notification** — preview the HUD.
-- **Open settings** — open the configuration file.
-- **Exit ReplayHUD** — close the app.
-
-To start ReplayHUD automatically when you sign in to Windows:
-
-1. Press `Win + R`.
-2. Enter `shell:startup`.
-3. Place a shortcut to `ReplayHUD.exe` in the Startup folder.
-
-For the HUD to appear over a game, use **borderless fullscreen**. A normal desktop topmost window may not appear over exclusive-fullscreen games, and some games or anti-cheat systems may block third-party overlays. ReplayHUD does not inject into or hook games.
+If OBS WebSocket authentication is disabled, leave the password field empty.
 
 ## Settings
 
-| Setting | Default | Description |
+Open Settings from the ReplayHUD tray menu.
+
+| Setting | Default | Range / meaning |
 |---|---:|---|
-| `port` | `4455` | Local OBS WebSocket port |
-| `password` | empty | OBS WebSocket password, if authentication is enabled |
-| `sound` | `1` | Play the Windows notification sound (`1` on, `0` off) |
-| `duration_ms` | `1800` | Toast duration in milliseconds (800–7000) |
-| `margin_px` | `28` | Margin from the top-right edge of the active monitor |
+| OBS WebSocket port | `4455` | 1–65535; must match OBS |
+| OBS WebSocket password | empty | Encrypted with DPAPI for the current Windows user |
+| Notification sound | On | Plays the Windows `SystemAsterisk` sound |
+| Notification duration | `2400 ms` | 800–10000 ms |
+| Screen edge margin | `24 px` | 8–200 px |
+| Position | Top right | Top right, top left, bottom right, bottom left |
+| Start with Windows | Off | Adds/removes a per-user Run registry entry |
+
+Settings are saved to:
+
+```text
+%LOCALAPPDATA%\ReplayHUD\ReplayHUD.ini
+```
+
+The connection log is saved to:
+
+```text
+%LOCALAPPDATA%\ReplayHUD\ReplayHUD.log
+```
+
+The password is stored as a DPAPI-protected value. It is intended to be decrypted by the same Windows user on the same machine; it is not a portable password backup.
+
+## Use
+
+- **Right-click tray icon → Settings...** opens the settings window.
+- **Right-click tray icon → Test notification** previews the notification and sound.
+- **Right-click tray icon → Open last replay** opens the most recently saved clip.
+- **Right-click tray icon → Open log file** opens the connection log.
+- **Right-click tray icon → Exit ReplayHUD** closes the app.
+- **Click a saved-clip notification** to open that clip.
+
+ReplayHUD does not record video, modify OBS scenes, or change Replay Buffer files. It only reacts to OBS's save event.
 
 ## Build from source
 
 ### Requirements
 
-- Visual Studio 2022 Build Tools or Visual Studio 2022 with **Desktop development with C++**.
+- Visual Studio 2022 or Visual Studio 2022 Build Tools with **Desktop development with C++**.
 - CMake 3.20 or newer.
-- Windows SDK.
+- Windows 10/11 SDK.
 
-### Build using the included script
+### Build
 
 Open **x64 Native Tools Command Prompt for VS 2022**, change to the repository directory, and run:
 
@@ -99,53 +95,59 @@ Open **x64 Native Tools Command Prompt for VS 2022**, change to the repository d
 build.bat
 ```
 
-The executable will be created at:
+The executable is created at:
 
 ```text
 build\Release\ReplayHUD.exe
 ```
 
-### Build using CMake directly
+You can also build directly with CMake:
 
 ```bat
 cmake -S . -B build -A x64
 cmake --build build --config Release --parallel
 ```
 
-The Release target uses the static MSVC runtime (`/MT`) and links against Windows system libraries.
+The build uses the static MSVC runtime (`/MT`). The application icon and Windows file-version metadata are embedded from `assets/ReplayHUD.ico` and `ReplayHUD.rc.in`.
 
 ## Automated GitHub Releases
 
-The workflow at `.github/workflows/release.yml` builds ReplayHUD on a GitHub-hosted Windows runner.
-
-Push a version tag beginning with `v` to trigger a build and publish a GitHub Release:
+The workflow at `.github/workflows/release.yml` builds a Windows x64 executable whenever a tag matching `v*` is pushed.
 
 ```bash
 git add .
 git commit -m "Prepare release"
 git push origin main
 
-git tag v1.0.0
-git push origin v1.0.0
+git tag -a v1.1.0 -m "ReplayHUD v1.1.0"
+git push origin v1.1.0
 ```
 
-For each matching tag, the workflow:
+For a tagged build, GitHub Actions:
 
-1. Configures and builds the x64 Release executable.
-2. Packages `ReplayHUD.exe`, this README, and the license into `ReplayHUD-Windows-x64.zip`.
-3. Publishes the executable and ZIP as release assets.
-4. Generates release notes automatically from the repository's changes.
+1. Configures and compiles the x64 Release executable on a Windows runner.
+2. Packages `ReplayHUD.exe`, `README.md`, and `LICENSE.txt` into `ReplayHUD-Windows-x64.zip`.
+3. Publishes the executable and ZIP to a GitHub Release.
+4. Generates release notes automatically from repository changes.
 
-You can also run the workflow manually from **Actions**. A manual run uploads workflow artifacts but does not publish a GitHub Release.
+A manual run from the Actions tab builds and uploads workflow artifacts but does not publish a GitHub Release. The workflow requests `contents: write`; repository Actions policy must allow release publishing.
 
-The workflow needs permission to publish releases. It requests `contents: write`; ensure the repository's **Settings → Actions → General → Workflow permissions** policy allows it. Use a new tag for each release.
+## Display limitations
 
-## How it works
+ReplayHUD is a normal topmost Windows desktop window, not an injected game overlay. Use borderless-windowed mode for the most reliable visibility over games. Exclusive-fullscreen applications and some anti-cheat or overlay policies can prevent third-party desktop windows from appearing above the game.
 
-ReplayHUD connects to the OBS WebSocket v5 server on `127.0.0.1`, authenticates using OBS's challenge-response procedure when a password is configured, and subscribes to the Outputs event category. When it receives `ReplayBufferSaved`, it displays a short notification containing the saved clip information.
+## Troubleshooting
 
-The HUD is a separate Windows desktop window. ReplayHUD does not alter OBS scenes, the Replay Buffer, or the saved video.
+- Check the tray tooltip. It reports whether ReplayHUD is connected, waiting, or has an OBS WebSocket error.
+- Confirm OBS WebSocket is enabled and the port/password match.
+- Confirm Replay Buffer is started, not merely configured.
+- Use **Test notification** to verify the Windows notification UI independently of OBS.
+- Open `%LOCALAPPDATA%\ReplayHUD\ReplayHUD.log` for connection details.
+
+## Protocol
+
+ReplayHUD uses OBS WebSocket v5's `Hello` / `Identify` handshake, SHA-256 challenge-response authentication, and the `Outputs` event subscription. It handles the `ReplayBufferSaved` event and reads `eventData.savedReplayPath`.
 
 ## License
 
-See [LICENSE.txt](LICENSE.txt).
+MIT. See [LICENSE.txt](LICENSE.txt).

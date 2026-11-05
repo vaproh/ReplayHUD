@@ -2,10 +2,9 @@
 /out/
 /Release/
 /Debug/
+.vs/
 *.obj
 *.pdb
 *.ilk
 *.exp
 *.lib
-.vs/
-.vscode/
