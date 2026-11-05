@@ -372,6 +372,7 @@ bool InstallPresentHook() {
         reinterpret_cast<LPVOID*>(&g_originalPresent));
     if (mhStatus != MH_OK) {
         LogHook(L"MinHook could not create the IDXGISwapChain::Present hook.");
+        SafeRelease(swapChain1);
         SafeRelease(context);
         SafeRelease(device);
         SafeRelease(swapChain);
