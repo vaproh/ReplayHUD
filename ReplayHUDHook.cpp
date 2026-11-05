@@ -142,7 +142,7 @@ void DrawOverlay() {
     const ImVec2 max(left + width, margin + panelHeight);
 
     draw->AddRectFilled(min, max, IM_COL32(20, 23, 29, 230), 16.0f);
-    draw->AddRect(min, max, IM_COL32(54, 61, 72, 255), 16.0f, 0, 1.0f);
+    draw->AddRect(min, max, IM_COL32(54, 61, 72, 255), 16.0f, 1.0f, ImDrawFlags_RoundCornersAll);
 
     const ImVec2 titlePosition(left + 20.0f, margin + 17.0f);
     const ImVec2 subtitlePosition(left + 20.0f, margin + 57.0f);
