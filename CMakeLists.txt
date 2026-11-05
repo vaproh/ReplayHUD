@@ -2,6 +2,15 @@ cmake_minimum_required(VERSION 3.21)
 
 project(ReplayHUD VERSION 1.3.0 LANGUAGES CXX)
 
+# A per-configure identifier keeps runtime DLLs versioned. Games may keep an
+# older hook mapped after ReplayHUD exits, so new builds must never overwrite it.
+string(RANDOM LENGTH 16 ALPHABET 0123456789abcdef REPLAYHUD_BUILD_ID)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ReplayHUDBuildConfig.h"
+    "#pragma once\n#define REPLAYHUD_BUILD_ID L\" ${REPLAYHUD_BUILD_ID}\"\n")
+
+set(REPLAYHUD_X86_HOOK "" CACHE FILEPATH "Path to the x86 ReplayHUDHook.dll used by the x64 app")
+set(REPLAYHUD_X86_INJECTOR "" CACHE FILEPATH "Path to the x86 ReplayHUDInjector32.exe used by the x64 app")
+
 if(NOT WIN32)
     message(FATAL_ERROR "ReplayHUD is a native Windows application and must be built on Windows.")
 endif()
@@ -56,7 +65,10 @@ add_executable(ReplayHUD WIN32
     assets/ReplayHUD.ico
 )
 
-target_include_directories(ReplayHUD PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(ReplayHUD PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_BINARY_DIR}"
+)
 target_compile_features(ReplayHUD PRIVATE cxx_std_17)
 
 if(MSVC)
@@ -108,6 +120,59 @@ if(MSVC)
     target_compile_options(ReplayHUDHook PRIVATE /W4 /permissive- /utf-8 /EHsc)
 endif()
 
+target_include_directories(ReplayHUDHook PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(ReplayHUDHook PRIVATE uih::uih user32)
 set_target_properties(ReplayHUDHook PROPERTIES OUTPUT_NAME "ReplayHUDHook")
+
+# D3D8 proxy is a standalone per-game DLL. Embed the architecture-matching
+# hook so users do not need to copy a second file beside the game executable.
+set(REPLAYHUD_D3D8_RESOURCES_RC "${CMAKE_CURRENT_BINARY_DIR}/ReplayHUDD3D8Resources.rc")
+add_custom_command(
+    OUTPUT "${REPLAYHUD_D3D8_RESOURCES_RC}"
+    COMMAND "${CMAKE_COMMAND}"
+        "-DOUTPUT=${REPLAYHUD_D3D8_RESOURCES_RC}"
+        "-DHOOK=$<TARGET_FILE:ReplayHUDHook>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateD3D8Resources.cmake"
+    DEPENDS ReplayHUDHook
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateD3D8Resources.cmake"
+    VERBATIM
+)
+target_sources(d3d8to9 PRIVATE "${REPLAYHUD_D3D8_RESOURCES_RC}")
+target_include_directories(d3d8to9 PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_BINARY_DIR}"
+)
+add_dependencies(d3d8to9 ReplayHUDHook)
+
+# The 64-bit launcher bundles both hook architectures and the 32-bit helper.
+# Build x86 components first, then pass their paths to the x64 configuration.
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    foreach(required REPLAYHUD_X86_HOOK REPLAYHUD_X86_INJECTOR)
+        if(NOT EXISTS "${${required}}")
+            message(FATAL_ERROR
+                "${required} must point to a built x86 component. Build the Win32 configuration first.")
+        endif()
+    endforeach()
+
+    set(REPLAYHUD_APP_RESOURCES_RC "${CMAKE_CURRENT_BINARY_DIR}/ReplayHUDAppResources.rc")
+    add_custom_command(
+        OUTPUT "${REPLAYHUD_APP_RESOURCES_RC}"
+        COMMAND "${CMAKE_COMMAND}"
+            "-DOUTPUT=${REPLAYHUD_APP_RESOURCES_RC}"
+            "-DX64_HOOK=$<TARGET_FILE:ReplayHUDHook>"
+            "-DX86_HOOK=${REPLAYHUD_X86_HOOK}"
+            "-DX86_INJECTOR=${REPLAYHUD_X86_INJECTOR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateAppResources.cmake"
+        DEPENDS ReplayHUDHook
+            "${REPLAYHUD_X86_HOOK}"
+            "${REPLAYHUD_X86_INJECTOR}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateAppResources.cmake"
+        VERBATIM
+    )
+    target_sources(ReplayHUD PRIVATE "${REPLAYHUD_APP_RESOURCES_RC}")
+    add_dependencies(ReplayHUD ReplayHUDHook)
+endif()
+
+target_compile_definitions(ReplayHUD PRIVATE REPLAYHUD_BUILD_ID=L\" ${REPLAYHUD_BUILD_ID}\")
+
 set_target_properties(ReplayHUD PROPERTIES OUTPUT_NAME "ReplayHUD")
