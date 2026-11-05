@@ -301,10 +301,14 @@ bool WriteEmbeddedResourceFile(const std::wstring& path, const EmbeddedResource&
         written == resource.size && FlushFileBuffers(file) != FALSE;
     CloseHandle(file);
 
-    if (!saved || !MoveFileExW(temporaryPath.c_str(), path.c_str(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    if (!saved) {
         DeleteFileW(temporaryPath.c_str());
         return false;
+    }
+    if (!MoveFileExW(temporaryPath.c_str(), path.c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DeleteFileW(temporaryPath.c_str());
+        return ResourceFileMatches(path, resource);
     }
     return true;
 }
