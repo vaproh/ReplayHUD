@@ -122,11 +122,11 @@ void SignalOverlayReady() {
         if (attempt == 0 || attempt % 15 == 0) {
             HANDLE opened = OpenEventW(EVENT_MODIFY_STATE, FALSE, replayhud::kOverlayReadyEventName);
             if (opened) {
-            HANDLE expected = nullptr;
-            if (!g_overlayReadyEvent.compare_exchange_strong(expected, opened,
-                    std::memory_order_acq_rel, std::memory_order_acquire)) {
-                CloseHandle(opened);
-            }
+                HANDLE expected = nullptr;
+                if (!g_overlayReadyEvent.compare_exchange_strong(expected, opened,
+                        std::memory_order_acq_rel, std::memory_order_acquire)) {
+                    CloseHandle(opened);
+                }
                 event = g_overlayReadyEvent.load(std::memory_order_acquire);
             }
         }
