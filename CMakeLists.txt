@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(ReplayHUD VERSION 1.1.0 LANGUAGES CXX)
+project(ReplayHUD VERSION 1.3.0 LANGUAGES CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "ReplayHUD is a native Windows application and must be built on Windows.")
