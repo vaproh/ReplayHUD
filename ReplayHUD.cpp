@@ -280,7 +280,7 @@ bool ResourceFileMatches(const std::wstring& path, const EmbeddedResource& resou
         DWORD read = 0;
         matches = ReadFile(file, contents.data(), resource.size, &read, nullptr) != FALSE &&
             read == resource.size &&
-            memcmp(contents.data(), resource.data, resource.size) == 0;
+            std::memcmp(contents.data(), resource.data, resource.size) == 0;
     }
 
     CloseHandle(file);
